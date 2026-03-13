@@ -6,7 +6,8 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "smoke:live": "tsx src/scripts/smoke-live.ts"
   },
   "dependencies": {
     "@prediction-arb-bot/core": "*",

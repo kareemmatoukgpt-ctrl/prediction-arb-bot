@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.1.0 — Live Exchange Data + Arb Improvements (2026-03-13)
+
+### Changed
+- **Exchange service**: replaced dynamic `import('pmxtjs')` with static named import; added `EXCHANGE_MODE=live|mock` env var (default: `live`) — live mode fails fast if pmxt is unreachable instead of silently falling back to mock data
+- **Binary orderbooks**: fetch both YES and NO orderbooks per venue per mapping (was only fetching YES side, hardcoding NO as null). Uses `fetchBinaryOrderbook()` with `Promise.all` for parallel fetches
+- **Ingestion**: validates all 4 token IDs (PM yes/no, Kalshi yes/no) before fetching orderbooks; selects Kalshi token IDs from DB (was missing)
+- **Cost model**: split conflated `bufferBps` into 4 separate params — `arbThresholdBps`, `slippageBps`, `polymarketTakerFeeBps`, `kalshiTakerFeeBps`. New formula: `totalCost = yesAsk*(1+fee+slippage) + noAsk*(1+fee+slippage)`; arb requires profit > threshold
+- **Arb dedupe**: unique index on `(mapping_id, direction)` with upsert — at most 1 opportunity row per mapping+direction. Stale opportunities auto-deleted each scan cycle. Hourly cleanup removes rows older than 7 days
+
+### Added
+- `npm run smoke:live` — standalone connectivity test that fetches markets + orderbooks from both exchanges and prints normalized quotes
+- Startup connectivity check — API exits immediately in live mode if pmxt is unreachable
+- `EXCHANGE_MODE`, `ARB_THRESHOLD_BPS`, `SLIPPAGE_BPS`, `PM_TAKER_FEE_BPS`, `KALSHI_TAKER_FEE_BPS` env vars
+
+### Removed
+- `BUFFER_BPS` env var (replaced by `ARB_THRESHOLD_BPS` + `SLIPPAGE_BPS`)
+
+---
+
 ## v1.0.0 — V1 Scaffold (2026-03-13)
 
 ### Added

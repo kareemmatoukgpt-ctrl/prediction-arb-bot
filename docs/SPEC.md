@@ -33,16 +33,33 @@ Polymarket and Kalshi for identical binary outcomes.
 3. **Arb Engine** evaluates both directions of each mapping for arbitrage:
    - Buy YES on Polymarket + Buy NO on Kalshi
    - Buy NO on Polymarket + Buy YES on Kalshi
-4. **Detection condition**: `total_cost_per_unit < 1 - buffer`
-5. **Paper Simulator** models execution with configurable latency, slippage, and fill rates
+4. **Orderbook model**: For each mapped market, fetch **both YES and NO orderbooks** per venue (binary markets have 2 separate outcomes with independent orderbooks)
+5. **Detection condition**: `profit_per_unit > arb_threshold`
+6. **Paper Simulator** models execution with configurable latency, slippage, and fill rates
 
 ## Cost Model
 
 ```
-total_cost = yes_ask + no_ask + taker_fees + slippage_buffer
-arb_exists = total_cost < 1.0 (payout for binary)
-profit = (1.0 - total_cost) * size_usd
+yes_all_in = yes_ask * (1 + venue_taker_fee + slippage)
+no_all_in  = no_ask  * (1 + venue_taker_fee + slippage)
+total_cost = yes_all_in + no_all_in
+
+profit     = 1.0 - total_cost
+arb_exists = profit > arb_threshold
+profit_usd = profit * size_usd
 ```
+
+Parameters (all configurable via env):
+- `ARB_THRESHOLD_BPS` — minimum edge to flag as arb (default: 50)
+- `SLIPPAGE_BPS` — expected execution slippage per side (default: 10)
+- `PM_TAKER_FEE_BPS` — Polymarket taker fee (default: 0)
+- `KALSHI_TAKER_FEE_BPS` — Kalshi taker fee (default: 0)
+
+## Exchange Mode
+
+`EXCHANGE_MODE=live|mock` (default: `live`)
+- **live**: connects to Polymarket and Kalshi via pmxt sidecar. Fails fast if unreachable.
+- **mock**: returns fake data. Use for development/CI.
 
 ## V1 Constraints
 

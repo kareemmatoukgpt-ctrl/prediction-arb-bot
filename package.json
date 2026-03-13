@@ -11,7 +11,8 @@
     "dev:web": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspaces",
     "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --build"
+    "typecheck": "tsc --build",
+    "smoke:live": "npm run smoke:live --workspace=apps/api"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

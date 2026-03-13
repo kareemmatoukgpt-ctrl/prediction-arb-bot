@@ -69,6 +69,16 @@ EXCHANGE_MODE=mock npm run dev:api
 EXCHANGE_MODE=live npm run dev:api
 ```
 
+## Smoke Test
+
+Quickly verify that live exchange connectivity works:
+
+```bash
+npm run smoke:live
+```
+
+This connects to both Polymarket and Kalshi, fetches a few markets and orderbooks, prints normalized quotes (YES ask, NO ask, combined cost), and exits non-zero on failure.
+
 ## Troubleshooting
 
 ### No opportunities appearing

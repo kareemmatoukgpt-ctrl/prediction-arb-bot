@@ -4,25 +4,30 @@ import { useEffect, useState } from 'react';
 import { getMappings, getOpportunities, getPaperStats, seedDemo } from '@/lib/api';
 import Link from 'next/link';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<any>(null);
   const [mappingCount, setMappingCount] = useState<number | null>(null);
   const [recentOpps, setRecentOpps] = useState<any[]>([]);
   const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'down'>('checking');
+  const [exchangeMode, setExchangeMode] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState('');
 
   async function load() {
     try {
-      const [mappings, opps, paperStats] = await Promise.all([
+      const [mappings, opps, paperStats, health] = await Promise.all([
         getMappings(),
         getOpportunities({ limit: 5 }),
         getPaperStats(),
+        fetch(`${API_BASE}/health`).then((r) => r.json()).catch(() => null),
       ]);
       setMappingCount(mappings.length);
       setRecentOpps(opps);
       setStats(paperStats);
       setApiStatus('ok');
+      if (health?.exchangeMode) setExchangeMode(health.exchangeMode);
     } catch {
       setApiStatus('down');
     }
@@ -47,7 +52,17 @@ export default function DashboardPage() {
     <>
       <div className="page-header">
         <h1>Prediction Arb Bot</h1>
-        <span className="badge badge-yellow">V1 — Paper Trading</span>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <span className="badge badge-yellow">V1 — Paper Trading</span>
+          {exchangeMode && (
+            <span
+              className={`badge ${exchangeMode === 'live' ? 'badge-green' : 'badge-yellow'}`}
+              title={exchangeMode === 'live' ? 'Connected to real Polymarket + Kalshi APIs' : 'Using mock data — no real exchange connection'}
+            >
+              {exchangeMode === 'live' ? 'LIVE' : 'MOCK'}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* API Status Banner */}

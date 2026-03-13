@@ -198,6 +198,75 @@ export async function fetchKalshiOrderbook(
   }
 }
 
+// ── Binary orderbook fetch (YES + NO) ──
+
+/**
+ * Fetch both YES and NO orderbooks for a binary market on a given venue.
+ * This is the correct way to get full pricing for arb detection:
+ *   - bestYesAsk = cost to buy YES (from the YES outcome's orderbook)
+ *   - bestNoAsk  = cost to buy NO  (from the NO outcome's orderbook)
+ */
+async function fetchBinaryOb(
+  exchange: any,
+  yesOutcomeId: string,
+  noOutcomeId: string,
+  venueName: string,
+): Promise<NormalizedOrderbook> {
+  const [yesOb, noOb] = await Promise.all([
+    exchange.fetchOrderBook(yesOutcomeId),
+    exchange.fetchOrderBook(noOutcomeId),
+  ]);
+
+  const yesBids = yesOb.bids || [];
+  const yesAsks = yesOb.asks || [];
+  const noBids = noOb.bids || [];
+  const noAsks = noOb.asks || [];
+
+  return {
+    bestYesBid: yesBids.length > 0 ? Math.max(...yesBids.map((b: any) => b.price)) : null,
+    bestYesAsk: yesAsks.length > 0 ? Math.min(...yesAsks.map((a: any) => a.price)) : null,
+    bestNoBid: noBids.length > 0 ? Math.max(...noBids.map((b: any) => b.price)) : null,
+    bestNoAsk: noAsks.length > 0 ? Math.min(...noAsks.map((a: any) => a.price)) : null,
+    depth: [...yesAsks, ...noAsks, ...yesBids, ...noBids].map((l: any) => ({
+      price: l.price,
+      size: l.size,
+    })),
+    raw: { yes: yesOb, no: noOb },
+  };
+}
+
+export async function fetchPolymarketBinaryOrderbook(
+  yesTokenId: string,
+  noTokenId: string,
+): Promise<NormalizedOrderbook> {
+  const live = await ensureInit();
+  if (!live) return getMockOrderbook();
+
+  try {
+    return await fetchBinaryOb(polymarket!, yesTokenId, noTokenId, 'Polymarket');
+  } catch (err) {
+    console.error('[exchange] Polymarket binary orderbook error:', err);
+    if (getExchangeMode() === 'live') throw err;
+    return getMockOrderbook();
+  }
+}
+
+export async function fetchKalshiBinaryOrderbook(
+  yesOutcomeId: string,
+  noOutcomeId: string,
+): Promise<NormalizedOrderbook> {
+  const live = await ensureInit();
+  if (!live) return getMockOrderbook();
+
+  try {
+    return await fetchBinaryOb(kalshi!, yesOutcomeId, noOutcomeId, 'Kalshi');
+  } catch (err) {
+    console.error('[exchange] Kalshi binary orderbook error:', err);
+    if (getExchangeMode() === 'live') throw err;
+    return getMockOrderbook();
+  }
+}
+
 // ── Mock data for development ──
 
 function getMockMarkets(venue: string): NormalizedMarket[] {

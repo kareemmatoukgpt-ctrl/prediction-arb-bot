@@ -2,11 +2,10 @@ import { v4 as uuid } from 'uuid';
 import { getDb } from '../db/schema';
 import {
   fetchPolymarketMarkets,
-  fetchPolymarketOrderbook,
+  fetchPolymarketBinaryOrderbook,
   fetchKalshiMarkets,
-  fetchKalshiOrderbook,
+  fetchKalshiBinaryOrderbook,
 } from './exchange';
-import type { Venue } from '@prediction-arb-bot/core';
 
 /**
  * Refresh markets from both venues and upsert into the database.
@@ -51,6 +50,7 @@ export async function refreshMarkets(): Promise<{ polymarket: number; kalshi: nu
 
 /**
  * Refresh orderbooks for all enabled mappings.
+ * Fetches BOTH YES and NO orderbooks per venue to get full binary pricing.
  */
 export async function refreshOrderbooks(): Promise<number> {
   const db = getDb();
@@ -58,7 +58,9 @@ export async function refreshOrderbooks(): Promise<number> {
   const mappings = db.prepare(`
     SELECT m.id as mapping_id, m.polymarket_market_id, m.kalshi_market_id,
            pm.yes_token_id as pm_yes_token, pm.no_token_id as pm_no_token,
-           pm.id as pm_id, k.id as k_id
+           pm.id as pm_id,
+           k.yes_token_id as k_yes_token, k.no_token_id as k_no_token,
+           k.id as k_id
     FROM match_mappings m
     JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
     JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
@@ -74,17 +76,40 @@ export async function refreshOrderbooks(): Promise<number> {
 
   for (const mapping of mappings) {
     try {
-      // Fetch Polymarket orderbook
-      const pmTokenId = mapping.pm_yes_token || mapping.polymarket_market_id;
-      const pmOb = await fetchPolymarketOrderbook(pmTokenId);
+      // Validate Polymarket token IDs
+      if (!mapping.pm_yes_token || !mapping.pm_no_token) {
+        console.warn(
+          `[ingestion] Skipping PM orderbook for mapping ${mapping.mapping_id}: ` +
+          `missing token IDs (yes=${mapping.pm_yes_token}, no=${mapping.pm_no_token})`
+        );
+        continue;
+      }
+
+      // Validate Kalshi outcome IDs
+      if (!mapping.k_yes_token || !mapping.k_no_token) {
+        console.warn(
+          `[ingestion] Skipping Kalshi orderbook for mapping ${mapping.mapping_id}: ` +
+          `missing outcome IDs (yes=${mapping.k_yes_token}, no=${mapping.k_no_token})`
+        );
+        continue;
+      }
+
+      // Fetch Polymarket binary orderbook (YES + NO)
+      const pmOb = await fetchPolymarketBinaryOrderbook(
+        mapping.pm_yes_token,
+        mapping.pm_no_token,
+      );
       insertSnapshot.run(
         uuid(), mapping.pm_id,
         pmOb.bestYesBid, pmOb.bestYesAsk, pmOb.bestNoBid, pmOb.bestNoAsk,
         JSON.stringify(pmOb.depth), JSON.stringify(pmOb.raw),
       );
 
-      // Fetch Kalshi orderbook
-      const kalshiOb = await fetchKalshiOrderbook(mapping.kalshi_market_id);
+      // Fetch Kalshi binary orderbook (YES + NO)
+      const kalshiOb = await fetchKalshiBinaryOrderbook(
+        mapping.k_yes_token,
+        mapping.k_no_token,
+      );
       insertSnapshot.run(
         uuid(), mapping.k_id,
         kalshiOb.bestYesBid, kalshiOb.bestYesAsk, kalshiOb.bestNoBid, kalshiOb.bestNoAsk,
@@ -97,7 +122,9 @@ export async function refreshOrderbooks(): Promise<number> {
     }
   }
 
-  console.log(`[ingestion] Refreshed ${count} orderbook snapshots for ${mappings.length} mappings`);
+  if (mappings.length > 0) {
+    console.log(`[ingestion] Refreshed ${count} orderbook snapshots for ${mappings.length} mappings`);
+  }
   return count;
 }
 

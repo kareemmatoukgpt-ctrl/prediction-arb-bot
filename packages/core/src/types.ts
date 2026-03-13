@@ -117,8 +117,10 @@ export interface SimpleOrderbook {
 }
 
 // ── Crypto market fields ──
+export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP' | 'DOGE' | 'ENA';
+
 export interface CryptoFields {
-  asset: 'BTC' | 'ETH' | 'SOL';
+  asset: CryptoAsset;
   expiryTs: number | null;
   predicateDirection: 'ABOVE' | 'BELOW' | null;
   predicateThreshold: number | null;

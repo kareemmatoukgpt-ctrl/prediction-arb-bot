@@ -143,6 +143,13 @@ function runMigrations(database: any): void {
       database.exec(`ALTER TABLE canonical_markets ADD COLUMN ${col} ${type}`);
     }
   }
+
+  // Migration: add mapping_kind column to match_mappings
+  const mappingCols = (database.pragma('table_info(match_mappings)') as any[]).map((r: any) => r.name);
+  if (!mappingCols.includes('mapping_kind')) {
+    console.log(`[db] Adding column match_mappings.mapping_kind`);
+    database.exec(`ALTER TABLE match_mappings ADD COLUMN mapping_kind TEXT NOT NULL DEFAULT 'manual_unverified'`);
+  }
 }
 
 export function getDb(): any {

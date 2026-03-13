@@ -81,6 +81,14 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
       noAsk: kalshiSnapshot.best_no_ask,
     };
 
+    // Sanity guard: if yesAsk + noAsk < 0.20 on either side, the mapping
+    // is likely invalid (wrong direction pairing or stale data). Skip.
+    const pmTotal = (pmOb.yesAsk ?? 0) + (pmOb.noAsk ?? 0);
+    const kTotal = (kalshiOb.yesAsk ?? 0) + (kalshiOb.noAsk ?? 0);
+    if (pmTotal < 0.20 || kTotal < 0.20) {
+      continue;
+    }
+
     const arbs = detectArb(pmOb, kalshiOb, sizeUSD, costParams);
 
     for (const arb of arbs) {

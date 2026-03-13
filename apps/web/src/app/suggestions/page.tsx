@@ -8,11 +8,13 @@ function ScoreBadge({ score }: { score: number }) {
 }
 
 function formatExpiry(ts: number | null): string {
-  if (!ts) return '—';
+  if (!ts) return '\u2014';
   const diff = ts - Math.floor(Date.now() / 1000);
   if (diff < 0) return 'expired';
-  const h = Math.floor(diff / 3600);
+  const d = Math.floor(diff / 86400);
+  const h = Math.floor((diff % 86400) / 3600);
   const m = Math.floor((diff % 3600) / 60);
+  if (d > 0) return `in ${d}d ${h}h`;
   if (h > 0) return `in ${h}h ${m}m`;
   return `in ${m}m`;
 }
@@ -22,9 +24,9 @@ function parseReasons(json: string): string[] {
 }
 
 function ReasonChip({ reason }: { reason: string }) {
-  const isGood = reason.includes('✅');
-  const isWarn = reason.includes('⚠️');
-  const isBad = reason.includes('❌');
+  const isGood = reason.includes('\u2705');
+  const isWarn = reason.includes('\u26a0\ufe0f');
+  const isBad = reason.includes('\u274c');
   const color = isGood ? 'var(--green)' : isWarn ? 'var(--yellow)' : isBad ? 'var(--red)' : 'var(--text-muted)';
   return (
     <span style={{
@@ -39,9 +41,71 @@ function ReasonChip({ reason }: { reason: string }) {
   );
 }
 
+function SuggestionCard({ s, tab, onApprove, onReject, actionMsg }: {
+  s: any; tab: string; onApprove: (id: string) => void; onReject: (id: string) => void;
+  actionMsg: { id: string; msg: string; ok: boolean } | null;
+}) {
+  const reasons = parseReasons(s.reasons_json);
+  const isActioned = actionMsg?.id === s.id;
+  return (
+    <div className="card" style={{ marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.75rem' }}>
+        {/* PM side */}
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+            <span className="badge badge-blue">PM</span>
+          </div>
+          <div style={{ fontSize: '0.85rem' }}>{s.pm_question || s.polymarket_market_id}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+            Expires: {formatExpiry(s.pm_expiry_ts)}
+            {s.pm_threshold != null && ` \u00b7 $${Number(s.pm_threshold).toLocaleString()}`}
+          </div>
+        </div>
+        {/* Score */}
+        <div style={{ textAlign: 'center', minWidth: '80px' }}>
+          <ScoreBadge score={s.score} />
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>score</div>
+        </div>
+        {/* Kalshi side */}
+        <div style={{ flex: 1, textAlign: 'right' }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+            <span className="badge badge-yellow">K</span>
+          </div>
+          <div style={{ fontSize: '0.85rem' }}>{s.k_question || s.kalshi_market_id}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+            Expires: {formatExpiry(s.k_expiry_ts)}
+            {s.k_threshold != null && ` \u00b7 $${Number(s.k_threshold).toLocaleString()}`}
+          </div>
+        </div>
+      </div>
+      {/* Reasons */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem', marginBottom: '0.5rem' }}>
+        {reasons.map((r, i) => <ReasonChip key={i} reason={r} />)}
+      </div>
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end' }}>
+        {isActioned && (
+          <span style={{ fontSize: '0.8rem', color: actionMsg!.ok ? 'var(--green)' : 'var(--red)', marginRight: 'auto' }}>
+            {actionMsg!.msg}
+          </span>
+        )}
+        <button className="btn btn-sm btn-danger" onClick={() => onReject(s.id)}>Reject</button>
+        {tab === 'arb_eligible' ? (
+          <button className="btn btn-sm btn-primary" onClick={() => onApprove(s.id)}>Approve</button>
+        ) : (
+          <button className="btn btn-sm" disabled title="Research-only \u2014 expiry or threshold mismatch too large" style={{ opacity: 0.4, cursor: 'not-allowed' }}>
+            Approve
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SuggestionsPage() {
-  const [tab, setTab] = useState<'arb_eligible' | 'research'>('arb_eligible');
+  const [tab, setTab] = useState<'arb_eligible' | 'research' | 'discovery'>('arb_eligible');
   const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [discoverySuggestions, setDiscoverySuggestions] = useState<any[]>([]);
   const [asset, setAsset] = useState('');
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState('');
@@ -50,10 +114,17 @@ export default function SuggestionsPage() {
 
   async function load() {
     try {
-      const data = await getSuggestions({ bucket: tab, status: 'suggested', asset: asset || undefined, limit: 100 });
-      setSuggestions(Array.isArray(data) ? data : []);
+      if (tab === 'discovery') {
+        // Discovery: top research pairs by score — shows closest-but-not-arb-eligible
+        const data = await getSuggestions({ bucket: 'research', status: 'suggested', asset: asset || undefined, minScore: 40, limit: 20 });
+        setDiscoverySuggestions(Array.isArray(data) ? data : []);
+      } else {
+        const data = await getSuggestions({ bucket: tab, status: 'suggested', asset: asset || undefined, limit: 100 });
+        setSuggestions(Array.isArray(data) ? data : []);
+      }
     } catch {
       setSuggestions([]);
+      setDiscoverySuggestions([]);
     } finally {
       setLoading(false);
     }
@@ -70,10 +141,10 @@ export default function SuggestionsPage() {
     setGenMsg('');
     try {
       const result = await generateSuggestions();
-      setGenMsg(`✅ ${result.arb_eligible ?? 0} arb-eligible, ${result.research ?? 0} research suggestions generated`);
+      setGenMsg(`${result.arb_eligible ?? 0} arb-eligible, ${result.research ?? 0} research suggestions generated`);
       await load();
     } catch (err: any) {
-      setGenMsg(`❌ ${err.message}`);
+      setGenMsg(`Error: ${err.message}`);
     } finally {
       setGenerating(false);
     }
@@ -119,9 +190,11 @@ export default function SuggestionsPage() {
             <option value="BTC">BTC</option>
             <option value="ETH">ETH</option>
             <option value="SOL">SOL</option>
+            <option value="XRP">XRP</option>
+            <option value="DOGE">DOGE</option>
           </select>
           <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
-            {generating ? 'Generating…' : 'Generate Suggestions'}
+            {generating ? 'Generating\u2026' : 'Generate Suggestions'}
           </button>
         </div>
       </div>
@@ -138,92 +211,97 @@ export default function SuggestionsPage() {
         <button style={tabStyle(tab === 'research')} onClick={() => setTab('research')}>
           Research
         </button>
+        <button style={tabStyle(tab === 'discovery')} onClick={() => setTab('discovery')}>
+          Discovery
+        </button>
       </div>
 
       {tab === 'research' && (
         <div className="card" style={{ marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--yellow)', borderColor: 'var(--yellow)' }}>
-          ⚠️ Research suggestions have expiry mismatch &gt;4h or threshold mismatch &gt;1%. They cannot be approved into active mappings.
+          Research suggestions have expiry or type mismatch. They cannot be approved into active mappings.
+        </div>
+      )}
+
+      {tab === 'discovery' && (
+        <div className="card" style={{ marginBottom: '1rem', fontSize: '0.8rem', color: 'var(--accent)', borderColor: 'var(--accent)' }}>
+          <strong>Closest comparable pairs</strong> &mdash; NOT arb-eligible. Shows why true cross-venue arbs are rare.
+          Common blockers: PM uses TOUCH_BY (any-time-touch), Kalshi uses CLOSE_AT (price at expiry).
+          <br />When contract types align, arb-eligible suggestions will appear automatically.
         </div>
       )}
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Loading…</div>
+        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Loading\u2026</div>
+      ) : tab === 'discovery' ? (
+        discoverySuggestions.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+            <p>No comparable pairs found. Try ingesting crypto markets first.</p>
+          </div>
+        ) : (
+          <div>
+            {discoverySuggestions.map((s: any) => {
+              const reasons = parseReasons(s.reasons_json);
+              // Find the "Research-only" reason which tells us why it's not arb-eligible
+              const blockReason = reasons.find(r => r.startsWith('Research-only:'));
+              return (
+                <div key={s.id} className="card" style={{ marginBottom: '1rem', borderColor: 'var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.5rem' }}>
+                    <div style={{ flex: 1 }}>
+                      <span className="badge badge-blue" style={{ marginRight: '0.3rem' }}>PM</span>
+                      <span style={{ fontSize: '0.85rem' }}>{s.pm_question || s.polymarket_market_id}</span>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                        Expires: {formatExpiry(s.pm_expiry_ts)}
+                        {s.pm_threshold != null && ` \u00b7 $${Number(s.pm_threshold).toLocaleString()}`}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'center', minWidth: '60px' }}>
+                      <ScoreBadge score={s.score} />
+                    </div>
+                    <div style={{ flex: 1, textAlign: 'right' }}>
+                      <span className="badge badge-yellow" style={{ marginRight: '0.3rem' }}>K</span>
+                      <span style={{ fontSize: '0.85rem' }}>{s.k_question || s.kalshi_market_id}</span>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                        Expires: {formatExpiry(s.k_expiry_ts)}
+                        {s.k_threshold != null && ` \u00b7 $${Number(s.k_threshold).toLocaleString()}`}
+                      </div>
+                    </div>
+                  </div>
+                  {blockReason && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--red)', padding: '0.3rem 0.5rem', background: 'rgba(239,68,68,0.08)', borderRadius: '4px', marginBottom: '0.4rem' }}>
+                      {blockReason}
+                    </div>
+                  )}
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.4rem' }}>
+                    {reasons.filter(r => !r.startsWith('Research-only:')).map((r, i) => <ReasonChip key={i} reason={r} />)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
       ) : suggestions.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
           <p>No {tab === 'arb_eligible' ? 'arb-eligible' : 'research'} suggestions found.</p>
           {tab === 'arb_eligible' && (
             <p style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-              Try: Markets page → Ingest Crypto, then click &ldquo;Generate Suggestions&rdquo; above.
-              <br />Arb-eligible pairs require matching asset, expiry ≤4h, threshold ≤1%, same type.
+              Try: Markets page &rarr; Ingest Crypto, then click &ldquo;Generate Suggestions&rdquo; above.
+              <br />Arb-eligible pairs require matching asset, expiry, threshold, direction, AND contract type.
+              <br />Check the Discovery tab to see what&apos;s closest and why.
             </p>
           )}
         </div>
       ) : (
         <div>
-          {suggestions.map((s: any) => {
-            const reasons = parseReasons(s.reasons_json);
-            const isActioned = actionMsg?.id === s.id;
-            return (
-              <div key={s.id} className="card" style={{ marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.75rem' }}>
-                  {/* PM side */}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-                      <span className="badge badge-blue">PM</span>
-                    </div>
-                    <div style={{ fontSize: '0.85rem' }}>{s.pm_question || s.polymarket_market_id}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      Expires: {formatExpiry(s.pm_expiry_ts)}
-                      {s.pm_threshold != null && ` · $${Number(s.pm_threshold).toLocaleString()}`}
-                    </div>
-                  </div>
-                  {/* Score */}
-                  <div style={{ textAlign: 'center', minWidth: '80px' }}>
-                    <ScoreBadge score={s.score} />
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>score</div>
-                  </div>
-                  {/* Kalshi side */}
-                  <div style={{ flex: 1, textAlign: 'right' }}>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-                      <span className="badge badge-yellow">K</span>
-                    </div>
-                    <div style={{ fontSize: '0.85rem' }}>{s.k_question || s.kalshi_market_id}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                      Expires: {formatExpiry(s.k_expiry_ts)}
-                      {s.k_threshold != null && ` · $${Number(s.k_threshold).toLocaleString()}`}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Reasons */}
-                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem', marginBottom: '0.5rem' }}>
-                  {reasons.map((r, i) => <ReasonChip key={i} reason={r} />)}
-                </div>
-
-                {/* Actions */}
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  {isActioned && (
-                    <span style={{ fontSize: '0.8rem', color: actionMsg!.ok ? 'var(--green)' : 'var(--red)', marginRight: 'auto' }}>
-                      {actionMsg!.msg}
-                    </span>
-                  )}
-                  <button className="btn btn-sm btn-danger" onClick={() => handleReject(s.id)}>Reject</button>
-                  {tab === 'arb_eligible' ? (
-                    <button className="btn btn-sm btn-primary" onClick={() => handleApprove(s.id)}>Approve</button>
-                  ) : (
-                    <button
-                      className="btn btn-sm"
-                      disabled
-                      title="Research-only — expiry or threshold mismatch too large"
-                      style={{ opacity: 0.4, cursor: 'not-allowed' }}
-                    >
-                      Approve
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {suggestions.map((s: any) => (
+            <SuggestionCard
+              key={s.id}
+              s={s}
+              tab={tab}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              actionMsg={actionMsg}
+            />
+          ))}
         </div>
       )}
     </>

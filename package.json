@@ -14,7 +14,9 @@
     "typecheck": "tsc --build",
     "smoke:live": "npm run smoke:live --workspace=apps/api",
     "verify:live": "npm run verify:live --workspace=apps/api",
-    "verify:crypto-mapping": "npm run verify:crypto-mapping --workspace=apps/api"
+    "verify:crypto-mapping": "npm run verify:crypto-mapping --workspace=apps/api",
+    "verify:arb-eligible": "npm run verify:arb-eligible --workspace=apps/api",
+    "test:parsing": "npm run test:parsing --workspace=apps/api"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

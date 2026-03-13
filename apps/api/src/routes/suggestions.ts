@@ -87,8 +87,8 @@ router.post('/:id/approve', (req: any, res: any) => {
 
   try {
     db.prepare(`
-      INSERT INTO match_mappings (id, polymarket_market_id, kalshi_market_id, label, confidence, enabled)
-      VALUES (?, ?, ?, ?, ?, 1)
+      INSERT INTO match_mappings (id, polymarket_market_id, kalshi_market_id, label, confidence, enabled, mapping_kind)
+      VALUES (?, ?, ?, ?, ?, 1, 'crypto_arb_eligible')
     `).run(mappingId, suggestion.polymarket_market_id, suggestion.kalshi_market_id, label, suggestion.score);
   } catch (err: any) {
     if (err.message?.includes('UNIQUE constraint')) {

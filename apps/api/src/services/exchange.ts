@@ -81,8 +81,10 @@ export interface NormalizedOrderbook {
   raw: any;
 }
 
+export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP' | 'DOGE' | 'ENA';
+
 export interface CryptoFieldsLocal {
-  asset: 'BTC' | 'ETH' | 'SOL';
+  asset: CryptoAsset;
   expiryTs: number | null;
   predicateDirection: 'ABOVE' | 'BELOW' | null;
   predicateThreshold: number | null;
@@ -91,8 +93,10 @@ export interface CryptoFieldsLocal {
 
 // ── Crypto field parsing ─────────────────────────────────────────────────────
 
-const ASSET_SERIES: Record<string, 'BTC' | 'ETH' | 'SOL'> = {
-  KXBTC: 'BTC', KXETH: 'ETH', KXSOL: 'SOL',
+const ASSET_SERIES: Record<string, CryptoAsset> = {
+  KXBTC: 'BTC', KXBTCD: 'BTC',
+  KXETH: 'ETH', KXETHD: 'ETH',
+  KXSOL: 'SOL', KXSOLD: 'SOL',
 };
 
 /** Parse Kalshi crypto fields — metadata-first, ticker-fallback. */
@@ -123,29 +127,55 @@ function parseKalshiCryptoFields(m: any): CryptoFieldsLocal | null {
   return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
 }
 
-/** Parse Polymarket crypto fields from question text. */
-function parsePolymarketCryptoFields(question: string, endDate?: string): CryptoFieldsLocal | null {
-  let asset: 'BTC' | 'ETH' | 'SOL' | null = null;
-  if (/bitcoin|\bbtc\b(?!\s*cash)/i.test(question)) asset = 'BTC';
-  else if (/ethereum|\beth\b(?!ereum)/i.test(question)) asset = 'ETH';
-  else if (/\bsolana\b|\bsol\b(?!ar)/i.test(question)) asset = 'SOL';
+// Asset regex patterns for Polymarket question parsing
+const PM_ASSET_PATTERNS: [RegExp, CryptoAsset][] = [
+  [/bitcoin|\bbtc\b(?!\s*cash)/i, 'BTC'],
+  [/ethereum|\beth\b/i, 'ETH'],
+  [/\bsolana\b|\bsol\b(?!ar|id|ution|ve)/i, 'SOL'],
+  [/\bxrp\b|\bripple\b/i, 'XRP'],
+  [/\bdoge(?:coin)?\b/i, 'DOGE'],
+  [/\bena\b|\bethena\b/i, 'ENA'],
+];
+
+/** Parse Polymarket crypto fields from question text. Exported for testing. */
+export function parsePolymarketCryptoFields(question: string, endDate?: string): CryptoFieldsLocal | null {
+  let asset: CryptoAsset | null = null;
+  for (const [regex, a] of PM_ASSET_PATTERNS) {
+    if (regex.test(question)) { asset = a; break; }
+  }
   if (!asset) return null;
 
+  // Direction detection
   let predicateDirection: 'ABOVE' | 'BELOW' | null = null;
-  if (/above|exceed|surpass|higher than|over|reach|break above|go above|end above|close above|stay above|remain above/i.test(question)) predicateDirection = 'ABOVE';
-  else if (/below|under|drop|fall below|less than|go below|end below|close below/i.test(question)) predicateDirection = 'BELOW';
+  if (/above|exceed|surpass|higher than|over|reach|break above|go above|end above|close above|stay above|remain above|hit\s+\$/i.test(question)) {
+    predicateDirection = 'ABOVE';
+  } else if (/below|under|drop|fall below|less than|go below|end below|close below|dip\s+to/i.test(question)) {
+    predicateDirection = 'BELOW';
+  }
 
+  // Threshold parsing — handles $81,249.99, 81.25k, 1.2m, $150,000
   let predicateThreshold: number | null = null;
-  const threshMatch = question.match(/\$?(\d[\d,]*\.?\d*)\s*(k|m|b)?\b/i);
+  const threshMatch = question.match(/\$\s*(\d[\d,]*\.?\d*)\s*(k|m|b)?\b/i);
   if (threshMatch) {
     const raw = parseFloat(threshMatch[1].replace(/,/g, ''));
     const suffix = (threshMatch[2] || '').toLowerCase();
     const multiplier = suffix === 'k' ? 1000 : suffix === 'm' ? 1_000_000 : suffix === 'b' ? 1_000_000_000 : 1;
     const val = raw * multiplier;
-    if (val >= 100 && val <= 10_000_000) predicateThreshold = val;
+    if (val >= 0.01 && val <= 10_000_000) predicateThreshold = val;
   }
 
-  const predicateType: 'CLOSE_AT' | 'TOUCH_BY' = /touch|at any point|at any time|ever reach/i.test(question) ? 'TOUCH_BY' : 'CLOSE_AT';
+  // Predicate type: "hit/reach/dip by <date>" = TOUCH_BY (resolves if price ever touches target)
+  // "close at/close above" or "end at/end above" = CLOSE_AT (resolves on final price at expiry)
+  // PM crypto markets almost always use "hit/reach/dip" → TOUCH_BY (Binance 1m candle high)
+  let predicateType: 'CLOSE_AT' | 'TOUCH_BY';
+  if (/\b(close|end|settle)\s+(at|above|below|over|under)/i.test(question)) {
+    predicateType = 'CLOSE_AT';
+  } else if (/\b(hit|reach|dip|touch|exceed|surpass|at any point|at any time|ever|by\b)/i.test(question)) {
+    predicateType = 'TOUCH_BY';
+  } else {
+    predicateType = 'TOUCH_BY'; // default for PM — most crypto markets are "will X reach Y by Z"
+  }
+
   const expiryTs: number | null = endDate ? Math.floor(new Date(endDate).getTime() / 1000) : null;
 
   return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
@@ -374,55 +404,104 @@ export async function fetchKalshiBinaryOrderbook(
 // ── Crypto-specific fetch helpers ────────────────────────────────────────────
 
 /**
- * Fetch Polymarket crypto price markets using multiple keyword searches.
- * Deduplicates by conditionId and token pair.
+ * Fetch Polymarket crypto price markets by paginating ALL open markets
+ * and filtering client-side.
+ *
+ * The Gamma API `q=` parameter does not actually filter results (see docs/DECISIONS.md D1).
+ * So we must paginate through all open markets and apply asset/threshold regex client-side.
  */
-export async function fetchPolymarketCryptoMarkets(limitPerQuery = 50): Promise<NormalizedMarket[]> {
+export async function fetchPolymarketCryptoMarkets(): Promise<NormalizedMarket[]> {
   if (getExchangeMode() === 'mock') return getMockMarkets('POLYMARKET');
 
-  const queries = [
-    'bitcoin above', 'bitcoin close', 'bitcoin exceed',
-    'ethereum above', 'ethereum close',
-    'solana above',
-  ];
-
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 120; // up to 12,000 markets — API has ~10k open
   const seenIds = new Set<string>();
-  const seenTokens = new Set<string>();
   const results: NormalizedMarket[] = [];
+  let totalScanned = 0;
 
-  for (const q of queries) {
+  console.log('[exchange] PM crypto scan: paginating all open markets...');
+
+  for (let page = 0; page < MAX_PAGES; page++) {
     try {
-      const markets = await fetchPolymarketMarkets(q, limitPerQuery);
+      const params = new URLSearchParams({
+        active: 'true',
+        closed: 'false',
+        limit: String(PAGE_SIZE),
+        offset: String(page * PAGE_SIZE),
+      });
+
+      const data = await fetchJson(`${PM_GAMMA_URL}/markets?${params}`, 30000);
+      const markets: any[] = Array.isArray(data) ? data : data.markets || [];
+
+      if (markets.length === 0) break; // no more results
+      totalScanned += markets.length;
+
       for (const m of markets) {
-        if (seenIds.has(m.venueMarketId)) continue;
-        const tokenKey = `${m.yesTokenId}|${m.noTokenId}`;
-        if (seenTokens.has(tokenKey)) continue;
-        seenIds.add(m.venueMarketId);
-        seenTokens.add(tokenKey);
-        results.push(m);
+        let tokenIds: string[] = [];
+        try {
+          tokenIds = typeof m.clobTokenIds === 'string'
+            ? JSON.parse(m.clobTokenIds)
+            : (m.clobTokenIds || []);
+        } catch { continue; }
+        if (tokenIds.length < 2) continue;
+
+        const conditionId = m.conditionId || m.id;
+        if (seenIds.has(conditionId)) continue;
+
+        const question = m.question || m.title || '';
+        // Combine multiple text fields — slug often has "bitcoin-above-85k"
+        const parseContext = [question, m.slug || '', m.groupItemTitle || '', (m.description || '').slice(0, 500)].join(' ');
+        const cryptoFields = parsePolymarketCryptoFields(parseContext, m.endDateIso || m.endDate);
+
+        if (!cryptoFields) continue; // not a crypto market
+
+        seenIds.add(conditionId);
+        results.push({
+          venueMarketId: conditionId,
+          question,
+          url: `https://polymarket.com/event/${m.slug || conditionId}`,
+          status: m.active ? 'open' : 'closed',
+          yesTokenId: tokenIds[0],
+          noTokenId: tokenIds[1],
+          resolvesAt: m.endDateIso || m.endDate || undefined,
+          cryptoFields,
+        });
       }
+
+      // Stop if we got a partial page (last page)
+      if (markets.length < PAGE_SIZE) break;
+
+      // Small delay between pages to avoid rate limiting
+      await new Promise(r => setTimeout(r, 100));
     } catch (err) {
-      console.warn(`[exchange] PM crypto search failed for q="${q}":`, err);
+      console.warn(`[exchange] PM crypto page ${page} failed:`, err);
+      // Continue to next page on error
     }
-    await new Promise(r => setTimeout(r, 300));
   }
 
+  console.log(`[exchange] PM crypto scan complete: ${results.length} crypto markets found in ${totalScanned} total scanned`);
   return results;
 }
 
 /**
  * Fetch Kalshi crypto markets for all known crypto series.
+ * Includes both bracket (KXBTC) and threshold (KXBTCD) series.
+ * KXBTCD/KXETHD/KXSOLD are threshold-style ("$X or above") — better for matching with PM.
  */
 export async function fetchKalshiCryptoMarkets(limitPerSeries = 200): Promise<NormalizedMarket[]> {
   if (getExchangeMode() === 'mock') return getMockMarkets('KALSHI');
 
-  const cryptoSeries = ['KXBTC', 'KXETH', 'KXSOL'];
+  // Threshold series (KXBTCD etc.) are structurally better for cross-venue matching
+  const cryptoSeries = ['KXBTC', 'KXBTCD', 'KXETH', 'KXETHD', 'KXSOL', 'KXSOLD'];
   const results: NormalizedMarket[] = [];
 
   for (const s of cryptoSeries) {
     try {
       const markets = await fetchKalshiMarkets(s, limitPerSeries);
       results.push(...markets);
+      if (markets.length > 0) {
+        console.log(`[exchange] Kalshi ${s}: ${markets.length} markets`);
+      }
     } catch (err) {
       console.warn(`[exchange] Kalshi crypto fetch failed for series ${s}:`, err);
     }

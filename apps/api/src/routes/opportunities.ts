@@ -13,7 +13,8 @@ router.get('/', (req: any, res: any) => {
 
   let query = `
     SELECT ao.*, mm.label as mapping_label,
-           mm.polymarket_market_id, mm.kalshi_market_id
+           mm.polymarket_market_id, mm.kalshi_market_id,
+           mm.mapping_kind
     FROM arb_opportunities ao
     JOIN match_mappings mm ON mm.id = ao.mapping_id
     WHERE ao.expected_profit_bps >= ?
@@ -47,7 +48,8 @@ router.get('/:id', (req: any, res: any) => {
   const db = getDb();
   const opp = db.prepare(`
     SELECT ao.*, mm.label as mapping_label,
-           mm.polymarket_market_id, mm.kalshi_market_id
+           mm.polymarket_market_id, mm.kalshi_market_id,
+           mm.mapping_kind
     FROM arb_opportunities ao
     JOIN match_mappings mm ON mm.id = ao.mapping_id
     WHERE ao.id = ?

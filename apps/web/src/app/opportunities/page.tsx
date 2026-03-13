@@ -6,6 +6,7 @@ import { getOpportunities, scanOpportunities, executePaperTrade } from '@/lib/ap
 export default function OpportunitiesPage() {
   const [opps, setOpps] = useState<any[]>([]);
   const [minEdge, setMinEdge] = useState(0);
+  const [showUnverified, setShowUnverified] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [executing, setExecuting] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -45,6 +46,12 @@ export default function OpportunitiesPage() {
     setExecuting(null);
   }
 
+  const filtered = showUnverified
+    ? opps
+    : opps.filter((o: any) => o.mapping_kind === 'crypto_arb_eligible');
+
+  const unverifiedCount = opps.filter((o: any) => o.mapping_kind !== 'crypto_arb_eligible').length;
+
   return (
     <>
       <div className="page-header">
@@ -79,10 +86,27 @@ export default function OpportunitiesPage() {
         </div>
       )}
 
+      {unverifiedCount > 0 && (
+        <div className="card" style={{ marginBottom: '1rem', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: 'var(--yellow)' }}>
+            {unverifiedCount} unverified mapping{unverifiedCount > 1 ? 's' : ''} hidden (manual or non-arb-eligible)
+          </span>
+          <button
+            className="btn btn-sm"
+            onClick={() => setShowUnverified(!showUnverified)}
+          >
+            {showUnverified ? 'Hide unverified' : 'Show unverified'}
+          </button>
+        </div>
+      )}
+
       <div className="card">
-        {opps.length === 0 ? (
+        {filtered.length === 0 ? (
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             No opportunities found. Make sure you have enabled mappings and the orderbook scanner is running.
+            {!showUnverified && unverifiedCount > 0 && (
+              <span> ({unverifiedCount} hidden from unverified mappings)</span>
+            )}
           </p>
         ) : (
           <table>
@@ -101,34 +125,48 @@ export default function OpportunitiesPage() {
               </tr>
             </thead>
             <tbody>
-              {opps.map((opp: any) => (
-                <tr key={opp.id}>
-                  <td style={{ fontWeight: 500 }}>{opp.mapping_label}</td>
-                  <td>
-                    <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>
-                      {opp.direction === 'BUY_YES_PM_BUY_NO_KALSHI' ? 'YES PM / NO K' : 'NO PM / YES K'}
-                    </span>
-                  </td>
-                  <td>${opp.cost_yes?.toFixed(3)}</td>
-                  <td>${opp.cost_no?.toFixed(3)}</td>
-                  <td>${(opp.cost_yes + opp.cost_no)?.toFixed(3)}</td>
-                  <td className="profit">{opp.expected_profit_bps}</td>
-                  <td className="profit">${opp.expected_profit_usd?.toFixed(2)}</td>
-                  <td>{opp.buffer_bps} bps</td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    {new Date(opp.ts).toLocaleTimeString()}
-                  </td>
-                  <td>
-                    <button
-                      className="btn btn-sm btn-primary"
-                      onClick={() => handleExecute(opp.id)}
-                      disabled={executing === opp.id}
-                    >
-                      {executing === opp.id ? 'Simulating...' : 'Simulate Execute'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((opp: any) => {
+                const isUnverified = opp.mapping_kind !== 'crypto_arb_eligible';
+                return (
+                  <tr key={opp.id} style={isUnverified ? { opacity: 0.6 } : {}}>
+                    <td style={{ fontWeight: 500 }}>
+                      {isUnverified && (
+                        <span className="badge badge-red" style={{ marginRight: '0.5rem', fontSize: '0.6rem' }}>
+                          UNVERIFIED
+                        </span>
+                      )}
+                      {opp.mapping_label}
+                    </td>
+                    <td>
+                      <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>
+                        {opp.direction === 'BUY_YES_PM_BUY_NO_KALSHI' ? 'YES PM / NO K' : 'NO PM / YES K'}
+                      </span>
+                    </td>
+                    <td>${opp.cost_yes?.toFixed(3)}</td>
+                    <td>${opp.cost_no?.toFixed(3)}</td>
+                    <td>${(opp.cost_yes + opp.cost_no)?.toFixed(3)}</td>
+                    <td className="profit">{opp.expected_profit_bps}</td>
+                    <td className="profit">${opp.expected_profit_usd?.toFixed(2)}</td>
+                    <td>{opp.buffer_bps} bps</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                      {new Date(opp.ts).toLocaleTimeString()}
+                    </td>
+                    <td>
+                      {isUnverified ? (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--red)' }}>DO NOT TRUST</span>
+                      ) : (
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => handleExecute(opp.id)}
+                          disabled={executing === opp.id}
+                        >
+                          {executing === opp.id ? 'Simulating...' : 'Simulate Execute'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

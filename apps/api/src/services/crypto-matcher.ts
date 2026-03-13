@@ -27,10 +27,12 @@ interface ScoreResult {
  *
  * Arb-eligible requires ALL of:
  *   1. Same asset (required)
- *   2. Expiry delta <= 4 hours (14400s)
- *   3. Predicate type match
- *   4. Direction match
- *   5. Threshold delta <= 1%
+ *   2. Predicate type match
+ *   3. Direction match
+ *   4. Threshold delta <= 1%
+ *   5. Expiry delta within type-specific window:
+ *      - CLOSE_AT: <= 4 hours
+ *      - TOUCH_BY: <= 24 hours (TOUCH_BY contracts are less time-sensitive)
  */
 export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
   const reasons: string[] = [];
@@ -42,7 +44,21 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
   reasons.push(`Asset: ${pm.asset} match`);
   let score = 40;
 
+  // Predicate type match (+10) — computed early because it affects expiry gate
+  const pmType = pm.predicate_type || 'TOUCH_BY';  // PM default is TOUCH_BY (hit/reach/dip)
+  const kType = kalshi.predicate_type || 'CLOSE_AT'; // Kalshi default is CLOSE_AT
+  let typeArbGate = false;
+  if (pmType === kType) {
+    score += 10; reasons.push(`Type: ${pmType}`); typeArbGate = true;
+  } else {
+    reasons.push(`Type mismatch (PM=${pmType} K=${kType})`);
+  }
+
   // Expiry proximity (up to +25)
+  // Expiry gate depends on predicate type:
+  //   CLOSE_AT: both must expire within 4h (contracts must settle at same time)
+  //   TOUCH_BY: within 24h is acceptable (both "touch by" a similar deadline)
+  const maxExpiryForArb = (pmType === 'TOUCH_BY' && kType === 'TOUCH_BY') ? 86400 : 14400;
   let expiryDeltaSeconds: number | null = null;
   let expiryArbGate = false;
   if (pm.expiry_ts && kalshi.expiry_ts) {
@@ -53,6 +69,7 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
       score += 20; reasons.push('Expiry within 4h'); expiryArbGate = true;
     } else if (expiryDeltaSeconds <= 86400) {
       score += 10; reasons.push('Expiry within 24h');
+      if (maxExpiryForArb >= 86400) expiryArbGate = true;
     } else if (expiryDeltaSeconds <= 604800) {
       score += 5; reasons.push('Expiry within 7 days');
     } else {
@@ -83,16 +100,6 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
     reasons.push('Threshold unknown (missing on one or both sides)');
   }
 
-  // Predicate type match (+10)
-  const pmType = pm.predicate_type || 'CLOSE_AT';
-  const kType = kalshi.predicate_type || 'CLOSE_AT';
-  let typeArbGate = false;
-  if (pmType === kType) {
-    score += 10; reasons.push(`Type: ${pmType}`); typeArbGate = true;
-  } else {
-    reasons.push(`Type mismatch (PM=${pmType} K=${kType})`);
-  }
-
   // Direction match (informational for score, required for arb)
   let directionArbGate = false;
   if (pm.predicate_direction && kalshi.predicate_direction) {
@@ -112,9 +119,9 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
 
   if (!isArbEligible) {
     const missing: string[] = [];
-    if (!expiryArbGate) missing.push('expiry>4h');
+    if (!expiryArbGate) missing.push(`expiry>${maxExpiryForArb / 3600}h`);
     if (!thresholdArbGate) missing.push('threshold>1%');
-    if (!typeArbGate) missing.push('type mismatch');
+    if (!typeArbGate) missing.push(`type mismatch (${pmType}≠${kType})`);
     if (!directionArbGate) missing.push('direction mismatch');
     reasons.push(`Research-only: ${missing.join(', ')}`);
   }

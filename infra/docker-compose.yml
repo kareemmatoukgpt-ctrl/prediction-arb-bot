@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    ports:
+      - "3001:3001"
+    environment:
+      - API_PORT=3001
+      - DATABASE_PATH=/data/prediction-arb-bot.db
+      - MARKET_REFRESH_INTERVAL_MS=600000
+      - ORDERBOOK_REFRESH_INTERVAL_MS=5000
+      - BUFFER_BPS=50
+      - DEFAULT_TRADE_SIZE_USD=100
+      - SIM_LATENCY_MIN_MS=250
+      - SIM_LATENCY_MAX_MS=2000
+      - SIM_SLIPPAGE_BPS=10
+    volumes:
+      - api-data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-data:

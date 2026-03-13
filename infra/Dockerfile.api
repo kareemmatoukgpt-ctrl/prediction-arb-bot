@@ -1,0 +1,18 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+COPY packages/core/package.json packages/core/
+COPY apps/api/package.json apps/api/
+
+RUN npm install --workspace=packages/core --workspace=apps/api
+
+COPY packages/core/ packages/core/
+COPY apps/api/ apps/api/
+
+RUN npm run build --workspace=packages/core
+RUN npm run build --workspace=apps/api
+
+EXPOSE 3001
+CMD ["node", "apps/api/dist/index.js"]

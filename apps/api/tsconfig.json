@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@prediction-arb-bot/core": ["../../packages/core/src"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/core" }
+  ]
+}

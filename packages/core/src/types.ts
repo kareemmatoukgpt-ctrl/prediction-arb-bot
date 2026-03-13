@@ -95,11 +95,14 @@ export interface PaperTrade {
 
 // ── Cost Model Params ──
 export interface CostModelParams {
-  takerFeeBps: number;
-  makerFeeBps: number;
-  polymarketGasCost: number;
-  kalshiFee: number;
-  bufferBps: number;
+  /** Polymarket taker fee in basis points (1 bps = 0.01%) */
+  polymarketTakerFeeBps: number;
+  /** Kalshi taker fee in basis points */
+  kalshiTakerFeeBps: number;
+  /** Expected execution slippage per side in basis points */
+  slippageBps: number;
+  /** Minimum edge required to flag as arb, in basis points */
+  arbThresholdBps: number;
 }
 
 // ── Orderbook for arb calculation ──

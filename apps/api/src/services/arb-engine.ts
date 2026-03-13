@@ -1,20 +1,26 @@
 import { v4 as uuid } from 'uuid';
 import { getDb } from '../db/schema';
 import { detectArb, DEFAULT_COST_PARAMS, ArbCheckResult } from '@prediction-arb-bot/core';
+import { CostModelParams } from '@prediction-arb-bot/core';
+
+function getCostParams(): CostModelParams {
+  return {
+    polymarketTakerFeeBps: parseInt(process.env.PM_TAKER_FEE_BPS || '0', 10),
+    kalshiTakerFeeBps: parseInt(process.env.KALSHI_TAKER_FEE_BPS || '0', 10),
+    slippageBps: parseInt(process.env.SLIPPAGE_BPS || '10', 10),
+    arbThresholdBps: parseInt(process.env.ARB_THRESHOLD_BPS || '50', 10),
+  };
+}
 
 /**
  * Scan all enabled mappings for arb opportunities using latest orderbook snapshots.
+ * Uses upsert to keep only the latest opportunity per (mapping_id, direction).
  */
 export function scanForArbs(): { found: number; opportunities: any[] } {
   const db = getDb();
 
   const sizeUSD = parseFloat(process.env.DEFAULT_TRADE_SIZE_USD || '100');
-  const bufferBps = parseInt(process.env.BUFFER_BPS || '50', 10);
-
-  const costParams = {
-    ...DEFAULT_COST_PARAMS,
-    bufferBps,
-  };
+  const costParams = getCostParams();
 
   // Get all enabled mappings with their latest orderbook snapshots
   const mappings = db.prepare(`
@@ -39,12 +45,25 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
     LIMIT 1
   `);
 
-  const insertArb = db.prepare(`
+  // Upsert: insert or update by (mapping_id, direction) unique constraint
+  const upsertArb = db.prepare(`
     INSERT INTO arb_opportunities (id, ts, mapping_id, direction, size_usd, cost_yes, cost_no, fees_estimate, slippage_estimate, buffer_bps, expected_profit_usd, expected_profit_bps, notes)
     VALUES (?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(mapping_id, direction) DO UPDATE SET
+      ts = datetime('now'),
+      size_usd = excluded.size_usd,
+      cost_yes = excluded.cost_yes,
+      cost_no = excluded.cost_no,
+      fees_estimate = excluded.fees_estimate,
+      slippage_estimate = excluded.slippage_estimate,
+      buffer_bps = excluded.buffer_bps,
+      expected_profit_usd = excluded.expected_profit_usd,
+      expected_profit_bps = excluded.expected_profit_bps,
+      notes = excluded.notes
   `);
 
   const opportunities: any[] = [];
+  const activeKeys = new Set<string>();
 
   for (const mapping of mappings) {
     const pmSnapshot = latestSnapshot.get(mapping.pm_id) as any;
@@ -66,7 +85,7 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
 
     for (const arb of arbs) {
       const id = uuid();
-      insertArb.run(
+      upsertArb.run(
         id,
         mapping.mapping_id,
         arb.direction,
@@ -75,11 +94,13 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
         arb.costNo,
         arb.feesEstimate,
         arb.slippageEstimate,
-        bufferBps,
+        costParams.arbThresholdBps,
         arb.expectedProfitUSD,
         arb.expectedProfitBps,
         `Mapping: ${mapping.label}`,
       );
+
+      activeKeys.add(`${mapping.mapping_id}|${arb.direction}`);
 
       opportunities.push({
         id,
@@ -105,13 +126,42 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
     }
   }
 
-  console.log(`[arb-engine] Scanned ${mappings.length} mappings, found ${opportunities.length} opportunities`);
+  // Remove stale opportunities that are no longer active
+  const allExisting = db.prepare(
+    'SELECT id, mapping_id, direction FROM arb_opportunities'
+  ).all() as any[];
+  const deleteStale = db.prepare('DELETE FROM arb_opportunities WHERE id = ?');
+  for (const row of allExisting) {
+    if (!activeKeys.has(`${row.mapping_id}|${row.direction}`)) {
+      deleteStale.run(row.id);
+    }
+  }
+
+  if (mappings.length > 0) {
+    console.log(`[arb-engine] Scanned ${mappings.length} mappings, found ${opportunities.length} opportunities`);
+  }
   return { found: opportunities.length, opportunities };
+}
+
+/**
+ * Delete arb opportunities older than 7 days.
+ */
+export function cleanupOldOpportunities(): number {
+  const db = getDb();
+  const result = db.prepare(`
+    DELETE FROM arb_opportunities
+    WHERE ts < datetime('now', '-7 days')
+  `).run();
+  if (result.changes > 0) {
+    console.log(`[arb-engine] Cleaned up ${result.changes} old opportunities`);
+  }
+  return result.changes;
 }
 
 // ── Arb scanning loop ──
 
 let arbTimer: NodeJS.Timeout | null = null;
+let cleanupTimer: NodeJS.Timeout | null = null;
 
 export function startArbScanner(): void {
   const interval = parseInt(process.env.ORDERBOOK_REFRESH_INTERVAL_MS || '5000', 10);
@@ -124,9 +174,20 @@ export function startArbScanner(): void {
       console.error('[arb-engine] Scan error:', err);
     }
   }, interval);
+
+  // Cleanup old opportunities every hour
+  cleanupTimer = setInterval(() => {
+    try {
+      cleanupOldOpportunities();
+    } catch (err) {
+      console.error('[arb-engine] Cleanup error:', err);
+    }
+  }, 60 * 60 * 1000);
 }
 
 export function stopArbScanner(): void {
   if (arbTimer) clearInterval(arbTimer);
+  if (cleanupTimer) clearInterval(cleanupTimer);
   arbTimer = null;
+  cleanupTimer = null;
 }

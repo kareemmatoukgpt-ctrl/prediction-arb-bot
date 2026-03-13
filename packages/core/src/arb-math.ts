@@ -1,31 +1,29 @@
 import {
   ArbDirection,
-  ArbOpportunity,
   CostModelParams,
   SimpleOrderbook,
 } from './types';
 
 /** Default cost model for V1 paper trading */
 export const DEFAULT_COST_PARAMS: CostModelParams = {
-  takerFeeBps: 0, // Polymarket: 0 taker fee on CLOB; Kalshi: varies
-  makerFeeBps: 0,
-  polymarketGasCost: 0, // paper trading: no gas
-  kalshiFee: 0, // simplified for paper
-  bufferBps: 50,
+  polymarketTakerFeeBps: 0,   // Polymarket: 0 taker fee on CLOB
+  kalshiTakerFeeBps: 0,       // Kalshi: varies by market, 0 for paper
+  slippageBps: 10,            // 10 bps expected slippage per side
+  arbThresholdBps: 50,        // require 50 bps minimum edge
 };
 
 /**
  * Estimate all-in cost for one side of a binary outcome purchase.
- * Returns the effective price including fees.
+ * Returns the effective price including fees and slippage.
  */
 export function estimateAllInCost(
   rawPrice: number,
-  sizeUSD: number,
-  params: CostModelParams,
+  feeBps: number,
+  slippageBps: number,
 ): number {
-  const takerFee = rawPrice * (params.takerFeeBps / 10_000);
-  const slippageEstimate = rawPrice * (params.bufferBps / 10_000);
-  return rawPrice + takerFee + slippageEstimate;
+  const fee = rawPrice * (feeBps / 10_000);
+  const slippage = rawPrice * (slippageBps / 10_000);
+  return rawPrice + fee + slippage;
 }
 
 /**
@@ -77,7 +75,12 @@ export interface ArbCheckResult {
 /**
  * Check for arbitrage in one direction.
  * Buy YES on venue A at ask + Buy NO on venue B at ask.
- * If total cost < 1 (payout) minus buffer, it's an arb.
+ *
+ * Cost model:
+ *   yesAllIn = yesAsk * (1 + venueFee + slippage)
+ *   noAllIn  = noAsk  * (1 + venueFee + slippage)
+ *   totalCost = yesAllIn + noAllIn
+ *   isArb = (1 - totalCost) > arbThreshold
  */
 export function checkArbDirection(
   yesAsk: number,
@@ -86,29 +89,36 @@ export function checkArbDirection(
   costParams: CostModelParams,
   direction: ArbDirection,
 ): ArbCheckResult {
-  const yesCostRaw = yesAsk;
-  const noCostRaw = noAsk;
+  // Determine per-venue fees based on direction
+  const yesVenueFeeBps = direction === 'BUY_YES_PM_BUY_NO_KALSHI'
+    ? costParams.polymarketTakerFeeBps
+    : costParams.kalshiTakerFeeBps;
+  const noVenueFeeBps = direction === 'BUY_YES_PM_BUY_NO_KALSHI'
+    ? costParams.kalshiTakerFeeBps
+    : costParams.polymarketTakerFeeBps;
 
-  const yesFee = yesCostRaw * (costParams.takerFeeBps / 10_000);
-  const noFee = noCostRaw * (costParams.takerFeeBps / 10_000);
-  const feesEstimate = (yesFee + noFee) * sizeUSD;
+  const slippage = costParams.slippageBps / 10_000;
+  const yesFeeRate = yesVenueFeeBps / 10_000;
+  const noFeeRate = noVenueFeeBps / 10_000;
 
-  const buffer = costParams.bufferBps / 10_000;
-  const slippageEstimate = (yesCostRaw + noCostRaw) * buffer * sizeUSD;
+  const yesAllIn = yesAsk * (1 + yesFeeRate + slippage);
+  const noAllIn = noAsk * (1 + noFeeRate + slippage);
+  const totalCostPerUnit = yesAllIn + noAllIn;
 
-  const totalCostPerUnit =
-    yesCostRaw + noCostRaw + yesFee + noFee + (yesCostRaw + noCostRaw) * buffer;
+  const feesEstimate = (yesAsk * yesFeeRate + noAsk * noFeeRate) * sizeUSD;
+  const slippageEstimate = (yesAsk + noAsk) * slippage * sizeUSD;
 
   const payout = 1.0; // binary outcome pays $1
+  const threshold = costParams.arbThresholdBps / 10_000;
   const profitPerUnit = payout - totalCostPerUnit;
   const expectedProfitUSD = profitPerUnit * sizeUSD;
   const expectedProfitBps = Math.round(profitPerUnit * 10_000);
 
   return {
-    isArb: totalCostPerUnit < payout,
+    isArb: profitPerUnit > threshold,
     direction,
-    costYes: yesCostRaw,
-    costNo: noCostRaw,
+    costYes: yesAsk,
+    costNo: noAsk,
     totalCost: totalCostPerUnit * sizeUSD,
     feesEstimate,
     slippageEstimate,

@@ -78,6 +78,41 @@ CREATE INDEX IF NOT EXISTS idx_paper_ts ON paper_trades(ts DESC);
 
 let db: any = null;
 
+/**
+ * Run migrations that must happen after schema creation.
+ * Safe to run multiple times (idempotent).
+ */
+function runMigrations(database: any): void {
+  // Migration: dedupe arb_opportunities so we can add a unique index.
+  // Delete older duplicates keeping only the newest per (mapping_id, direction).
+  const hasDupes = database.prepare(`
+    SELECT COUNT(*) as cnt FROM (
+      SELECT mapping_id, direction, COUNT(*) as c
+      FROM arb_opportunities
+      GROUP BY mapping_id, direction
+      HAVING c > 1
+    )
+  `).get() as any;
+
+  if (hasDupes.cnt > 0) {
+    console.log(`[db] Deduplicating ${hasDupes.cnt} arb_opportunity groups...`);
+    database.exec(`
+      DELETE FROM arb_opportunities WHERE id NOT IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (PARTITION BY mapping_id, direction ORDER BY ts DESC) as rn
+          FROM arb_opportunities
+        ) WHERE rn = 1
+      )
+    `);
+  }
+
+  // Add unique index for upsert dedupe (idempotent via IF NOT EXISTS)
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_arb_dedupe
+      ON arb_opportunities(mapping_id, direction)
+  `);
+}
+
 export function getDb(): any {
   if (!db) {
     const dbPath = process.env.DATABASE_PATH || './prediction-arb-bot.db';
@@ -85,6 +120,7 @@ export function getDb(): any {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     db.exec(SCHEMA_SQL);
+    runMigrations(db);
   }
   return db;
 }

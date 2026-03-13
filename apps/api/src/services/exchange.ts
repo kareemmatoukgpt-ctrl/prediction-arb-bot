@@ -239,7 +239,8 @@ export async function fetchKalshiMarkets(
       venueMarketId: m.ticker,
       question: m.title || m.question || '',
       url: `https://kalshi.com/markets/${m.ticker}`,
-      status: m.status || 'open',
+      // Kalshi uses 'active'/'finalized'; normalize to the DB's allowed values
+      status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
       yesTokenId: m.ticker,  // Kalshi uses ticker for both YES and NO sides
       noTokenId: m.ticker,
       resolvesAt: m.close_time || m.expiration_time || undefined,

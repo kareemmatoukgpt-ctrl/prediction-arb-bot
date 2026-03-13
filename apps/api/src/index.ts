@@ -12,6 +12,7 @@ import marketsRouter from './routes/markets';
 import opportunitiesRouter from './routes/opportunities';
 import paperTradesRouter from './routes/paper-trades';
 import demoRouter from './routes/demo';
+import suggestionsRouter from './routes/suggestions';
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT || '3001', 10);
@@ -42,8 +43,8 @@ app.get('/api/debug/mappings', (_req, res) => {
       k.yes_token_id      AS k_yes_token,
       k.no_token_id       AS k_no_token
     FROM match_mappings mm
-    JOIN canonical_markets pm ON mm.polymarket_market_id = pm.id
-    JOIN canonical_markets k  ON mm.kalshi_market_id    = k.id
+    JOIN canonical_markets pm ON mm.polymarket_market_id = pm.venue_market_id AND pm.venue = 'POLYMARKET'
+    JOIN canonical_markets k  ON mm.kalshi_market_id    = k.venue_market_id  AND k.venue  = 'KALSHI'
     ORDER BY mm.id
   `).all();
   res.json({ exchangeMode: process.env.EXCHANGE_MODE || 'live', mappings: rows });
@@ -55,6 +56,7 @@ app.use('/api/markets', marketsRouter);
 app.use('/api/opportunities', opportunitiesRouter);
 app.use('/api/paper-trades', paperTradesRouter);
 app.use('/api/demo', demoRouter);
+app.use('/api/suggestions', suggestionsRouter);
 
 // Initialize database
 getDb();

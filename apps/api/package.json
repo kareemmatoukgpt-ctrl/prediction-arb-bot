@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "db:migrate": "tsx src/db/migrate.ts",
     "smoke:live": "tsx src/scripts/smoke-live.ts",
-    "verify:live": "tsx src/scripts/verify-live.ts"
+    "verify:live": "tsx src/scripts/verify-live.ts",
+    "verify:crypto-mapping": "tsx src/scripts/verify-crypto-mapping.ts"
   },
   "dependencies": {
     "@prediction-arb-bot/core": "*",

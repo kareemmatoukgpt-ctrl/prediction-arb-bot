@@ -115,3 +115,30 @@ export interface SimpleOrderbook {
   bids: OrderbookSide[];
   asks: OrderbookSide[];
 }
+
+// ── Crypto market fields ──
+export interface CryptoFields {
+  asset: 'BTC' | 'ETH' | 'SOL';
+  expiryTs: number | null;
+  predicateDirection: 'ABOVE' | 'BELOW' | null;
+  predicateThreshold: number | null;
+  predicateType: 'CLOSE_AT' | 'TOUCH_BY';
+}
+
+// ── Mapping suggestion ──
+export type SuggestionBucket = 'arb_eligible' | 'research';
+export type SuggestionStatus = 'suggested' | 'approved' | 'rejected';
+
+export interface MappingSuggestion {
+  id: string;
+  polymarketMarketId: string;
+  kalshiMarketId: string;
+  score: number;
+  reasonsJson: string;
+  bucket: SuggestionBucket;
+  status: SuggestionStatus;
+  expiryDeltaSeconds: number | null;
+  thresholdDeltaPct: number | null;
+  createdAt: string;
+  updatedAt: string;
+}

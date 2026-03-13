@@ -74,6 +74,22 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 );
 
 CREATE INDEX IF NOT EXISTS idx_paper_ts ON paper_trades(ts DESC);
+
+CREATE TABLE IF NOT EXISTS mapping_suggestions (
+  id TEXT PRIMARY KEY,
+  polymarket_market_id TEXT NOT NULL,
+  kalshi_market_id TEXT NOT NULL,
+  score INTEGER NOT NULL,
+  reasons_json TEXT NOT NULL,
+  bucket TEXT NOT NULL DEFAULT 'research' CHECK(bucket IN ('arb_eligible','research')),
+  status TEXT NOT NULL DEFAULT 'suggested' CHECK(status IN ('suggested','approved','rejected')),
+  expiry_delta_seconds INTEGER,
+  threshold_delta_pct REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(polymarket_market_id, kalshi_market_id)
+);
+CREATE INDEX IF NOT EXISTS idx_suggestions_status ON mapping_suggestions(status, bucket);
 `;
 
 let db: any = null;
@@ -111,6 +127,22 @@ function runMigrations(database: any): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_arb_dedupe
       ON arb_opportunities(mapping_id, direction)
   `);
+
+  // Migration: add crypto normalization columns (idempotent)
+  const existingCols = (database.pragma('table_info(canonical_markets)') as any[]).map((r: any) => r.name);
+  const cryptoCols: Record<string, string> = {
+    asset: 'TEXT',
+    expiry_ts: 'INTEGER',
+    predicate_direction: 'TEXT',
+    predicate_threshold: 'REAL',
+    predicate_type: 'TEXT',
+  };
+  for (const [col, type] of Object.entries(cryptoCols)) {
+    if (!existingCols.includes(col)) {
+      console.log(`[db] Adding column canonical_markets.${col}`);
+      database.exec(`ALTER TABLE canonical_markets ADD COLUMN ${col} ${type}`);
+    }
+  }
 }
 
 export function getDb(): any {

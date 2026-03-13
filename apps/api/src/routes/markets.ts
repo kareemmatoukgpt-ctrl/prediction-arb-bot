@@ -1,6 +1,6 @@
 import express = require('express');
 import { getDb } from '../db/schema';
-import { refreshMarkets } from '../services/ingestion';
+import { refreshMarkets, refreshCryptoMarkets } from '../services/ingestion';
 
 const router = express.Router();
 
@@ -22,6 +22,12 @@ router.get('/', (req: any, res: any) => {
   if (search) {
     query += ' AND question LIKE ?';
     params.push(`%${search}%`);
+  }
+
+  const asset = req.query.asset as string | undefined;
+  if (asset) {
+    query += ' AND asset = ?';
+    params.push(asset.toUpperCase());
   }
 
   query += ' ORDER BY updated_at DESC LIMIT ?';
@@ -53,6 +59,17 @@ router.get('/:id/orderbook', (req: any, res: any) => {
 
   if (!snapshot) return res.status(404).json({ error: 'No orderbook data' });
   res.json(snapshot);
+});
+
+// Ingest crypto markets from both venues
+router.post('/ingest/crypto', async (_req: any, res: any) => {
+  try {
+    const result = await refreshCryptoMarkets();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[markets] ingest/crypto error:', err);
+    res.status(500).json({ error: 'Failed to ingest crypto markets' });
+  }
 });
 
 export default router;

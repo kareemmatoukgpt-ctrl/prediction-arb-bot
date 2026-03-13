@@ -62,3 +62,29 @@ export const executePaperTrade = (opportunityId: string) =>
     method: 'POST',
     body: JSON.stringify({ opportunityId }),
   });
+
+// ── Crypto / Suggestions ──────────────────────────────────────────────────────
+
+export const ingestCrypto = () =>
+  fetchApi('/api/markets/ingest/crypto', { method: 'POST' });
+
+export const getSuggestions = (params: {
+  asset?: string; minScore?: number; status?: string; bucket?: string; limit?: number;
+} = {}) => {
+  const qs = new URLSearchParams();
+  if (params.asset) qs.set('asset', params.asset);
+  if (params.minScore != null) qs.set('minScore', String(params.minScore));
+  if (params.status) qs.set('status', params.status);
+  if (params.bucket) qs.set('bucket', params.bucket);
+  if (params.limit != null) qs.set('limit', String(params.limit));
+  return fetchApi(`/api/suggestions?${qs}`);
+};
+
+export const generateSuggestions = () =>
+  fetchApi('/api/suggestions/generate', { method: 'POST' });
+
+export const approveSuggestion = (id: string) =>
+  fetchApi(`/api/suggestions/${id}/approve`, { method: 'POST' });
+
+export const rejectSuggestion = (id: string) =>
+  fetchApi(`/api/suggestions/${id}/reject`, { method: 'POST' });

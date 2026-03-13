@@ -69,6 +69,7 @@ export interface NormalizedMarket {
   yesTokenId?: string;
   noTokenId?: string;
   resolvesAt?: string;
+  cryptoFields?: CryptoFieldsLocal;
 }
 
 export interface NormalizedOrderbook {
@@ -78,6 +79,76 @@ export interface NormalizedOrderbook {
   bestNoAsk: number | null;
   depth: { price: number; size: number }[];
   raw: any;
+}
+
+export interface CryptoFieldsLocal {
+  asset: 'BTC' | 'ETH' | 'SOL';
+  expiryTs: number | null;
+  predicateDirection: 'ABOVE' | 'BELOW' | null;
+  predicateThreshold: number | null;
+  predicateType: 'CLOSE_AT' | 'TOUCH_BY';
+}
+
+// ── Crypto field parsing ─────────────────────────────────────────────────────
+
+const ASSET_SERIES: Record<string, 'BTC' | 'ETH' | 'SOL'> = {
+  KXBTC: 'BTC', KXETH: 'ETH', KXSOL: 'SOL',
+};
+
+/** Parse Kalshi crypto fields — metadata-first, ticker-fallback. */
+function parseKalshiCryptoFields(m: any): CryptoFieldsLocal | null {
+  const seriesPrefix = (m.event_ticker || m.ticker || '').split('-')[0];
+  const asset = ASSET_SERIES[seriesPrefix];
+  if (!asset) return null;
+
+  const predicateThreshold: number | null = m.floor_strike != null ? Number(m.floor_strike) : null;
+
+  const expiryTs: number | null = m.close_time
+    ? Math.floor(new Date(m.close_time).getTime() / 1000)
+    : m.expiration_time
+    ? Math.floor(new Date(m.expiration_time).getTime() / 1000)
+    : null;
+
+  let predicateDirection: 'ABOVE' | 'BELOW' | null = null;
+  const subText = (m.subtitle || m.yes_sub_title || m.yes_subtitle || '').toLowerCase();
+  if (/or above|and above|>= |greater than or equal|at least/.test(subText)) predicateDirection = 'ABOVE';
+  else if (/or below|and below|<= |less than or equal|at most/.test(subText)) predicateDirection = 'BELOW';
+  else if (subText.includes('above') || subText.includes('over')) predicateDirection = 'ABOVE';
+  else if (subText.includes('below') || subText.includes('under')) predicateDirection = 'BELOW';
+  if (!predicateDirection && m.floor_strike != null) predicateDirection = 'ABOVE';
+
+  const allText = ((m.title || '') + ' ' + (m.subtitle || '') + ' ' + (m.rules || '')).toLowerCase();
+  const predicateType: 'CLOSE_AT' | 'TOUCH_BY' = /touch|at any point|at any time|ever reach/.test(allText) ? 'TOUCH_BY' : 'CLOSE_AT';
+
+  return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
+}
+
+/** Parse Polymarket crypto fields from question text. */
+function parsePolymarketCryptoFields(question: string, endDate?: string): CryptoFieldsLocal | null {
+  let asset: 'BTC' | 'ETH' | 'SOL' | null = null;
+  if (/bitcoin|\bbtc\b(?!\s*cash)/i.test(question)) asset = 'BTC';
+  else if (/ethereum|\beth\b(?!ereum)/i.test(question)) asset = 'ETH';
+  else if (/\bsolana\b|\bsol\b(?!ar)/i.test(question)) asset = 'SOL';
+  if (!asset) return null;
+
+  let predicateDirection: 'ABOVE' | 'BELOW' | null = null;
+  if (/above|exceed|surpass|higher than|over|reach|break above|go above|end above|close above|stay above|remain above/i.test(question)) predicateDirection = 'ABOVE';
+  else if (/below|under|drop|fall below|less than|go below|end below|close below/i.test(question)) predicateDirection = 'BELOW';
+
+  let predicateThreshold: number | null = null;
+  const threshMatch = question.match(/\$?(\d[\d,]*\.?\d*)\s*(k|m|b)?\b/i);
+  if (threshMatch) {
+    const raw = parseFloat(threshMatch[1].replace(/,/g, ''));
+    const suffix = (threshMatch[2] || '').toLowerCase();
+    const multiplier = suffix === 'k' ? 1000 : suffix === 'm' ? 1_000_000 : suffix === 'b' ? 1_000_000_000 : 1;
+    const val = raw * multiplier;
+    if (val >= 100 && val <= 10_000_000) predicateThreshold = val;
+  }
+
+  const predicateType: 'CLOSE_AT' | 'TOUCH_BY' = /touch|at any point|at any time|ever reach/i.test(question) ? 'TOUCH_BY' : 'CLOSE_AT';
+  const expiryTs: number | null = endDate ? Math.floor(new Date(endDate).getTime() / 1000) : null;
+
+  return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
 }
 
 // ── Connectivity check ───────────────────────────────────────────────────────
@@ -156,15 +227,21 @@ export async function fetchPolymarketMarkets(
         return { m, tokenIds };
       })
       .filter(({ tokenIds }: any) => tokenIds.length >= 2)
-      .map(({ m, tokenIds }: any) => ({
-        venueMarketId: m.conditionId || m.id || m.marketId,
-        question: m.question || m.title || '',
-        url: `https://polymarket.com/event/${m.slug || m.conditionId}`,
-        status: m.active ? 'open' : 'closed',
-        yesTokenId: tokenIds[0],
-        noTokenId: tokenIds[1],
-        resolvesAt: m.endDateIso || m.endDate || undefined,
-      }));
+      .map(({ m, tokenIds }: any) => {
+        const question = m.question || m.title || '';
+        // Combine all text fields for asset/threshold detection (slug often has "bitcoin-above-85k")
+        const parseContext = [question, m.slug || '', m.groupItemTitle || '', m.description || ''].join(' ');
+        return {
+          venueMarketId: m.conditionId || m.id || m.marketId,
+          question,
+          url: `https://polymarket.com/event/${m.slug || m.conditionId}`,
+          status: m.active ? 'open' : 'closed',
+          yesTokenId: tokenIds[0],
+          noTokenId: tokenIds[1],
+          resolvesAt: m.endDateIso || m.endDate || undefined,
+          cryptoFields: parsePolymarketCryptoFields(parseContext, m.endDateIso || m.endDate) || undefined,
+        };
+      });
   } catch (err) {
     console.error('[exchange] Polymarket fetchMarkets error:', err);
     return [];
@@ -244,6 +321,7 @@ export async function fetchKalshiMarkets(
       yesTokenId: m.ticker,  // Kalshi uses ticker for both YES and NO sides
       noTokenId: m.ticker,
       resolvesAt: m.close_time || m.expiration_time || undefined,
+      cryptoFields: parseKalshiCryptoFields(m) || undefined,
     }));
   } catch (err) {
     console.error('[exchange] Kalshi fetchMarkets error:', err);
@@ -291,6 +369,66 @@ export async function fetchKalshiBinaryOrderbook(
     depth: [],  // Kalshi doesn't expose depth levels in this endpoint
     raw: m,
   };
+}
+
+// ── Crypto-specific fetch helpers ────────────────────────────────────────────
+
+/**
+ * Fetch Polymarket crypto price markets using multiple keyword searches.
+ * Deduplicates by conditionId and token pair.
+ */
+export async function fetchPolymarketCryptoMarkets(limitPerQuery = 50): Promise<NormalizedMarket[]> {
+  if (getExchangeMode() === 'mock') return getMockMarkets('POLYMARKET');
+
+  const queries = [
+    'bitcoin above', 'bitcoin close', 'bitcoin exceed',
+    'ethereum above', 'ethereum close',
+    'solana above',
+  ];
+
+  const seenIds = new Set<string>();
+  const seenTokens = new Set<string>();
+  const results: NormalizedMarket[] = [];
+
+  for (const q of queries) {
+    try {
+      const markets = await fetchPolymarketMarkets(q, limitPerQuery);
+      for (const m of markets) {
+        if (seenIds.has(m.venueMarketId)) continue;
+        const tokenKey = `${m.yesTokenId}|${m.noTokenId}`;
+        if (seenTokens.has(tokenKey)) continue;
+        seenIds.add(m.venueMarketId);
+        seenTokens.add(tokenKey);
+        results.push(m);
+      }
+    } catch (err) {
+      console.warn(`[exchange] PM crypto search failed for q="${q}":`, err);
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  return results;
+}
+
+/**
+ * Fetch Kalshi crypto markets for all known crypto series.
+ */
+export async function fetchKalshiCryptoMarkets(limitPerSeries = 200): Promise<NormalizedMarket[]> {
+  if (getExchangeMode() === 'mock') return getMockMarkets('KALSHI');
+
+  const cryptoSeries = ['KXBTC', 'KXETH', 'KXSOL'];
+  const results: NormalizedMarket[] = [];
+
+  for (const s of cryptoSeries) {
+    try {
+      const markets = await fetchKalshiMarkets(s, limitPerSeries);
+      results.push(...markets);
+    } catch (err) {
+      console.warn(`[exchange] Kalshi crypto fetch failed for series ${s}:`, err);
+    }
+  }
+
+  return results;
 }
 
 // ── Mock data ────────────────────────────────────────────────────────────────

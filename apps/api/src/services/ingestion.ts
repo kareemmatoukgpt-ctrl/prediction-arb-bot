@@ -5,6 +5,8 @@ import {
   fetchPolymarketBinaryOrderbook,
   fetchKalshiMarkets,
   fetchKalshiBinaryOrderbook,
+  fetchPolymarketCryptoMarkets,
+  fetchKalshiCryptoMarkets,
 } from './exchange';
 
 /**
@@ -45,6 +47,61 @@ export async function refreshMarkets(): Promise<{ polymarket: number; kalshi: nu
   }
 
   console.log(`[ingestion] Refreshed markets: PM=${pmMarkets.length}, Kalshi=${kalshiMarkets.length}`);
+  return { polymarket: pmMarkets.length, kalshi: kalshiMarkets.length };
+}
+
+/**
+ * Refresh crypto markets from both venues, writing normalized crypto fields.
+ */
+export async function refreshCryptoMarkets(): Promise<{ polymarket: number; kalshi: number }> {
+  const db = getDb();
+
+  const upsert = db.prepare(`
+    INSERT INTO canonical_markets (id, venue, venue_market_id, question, url, status, yes_token_id, no_token_id, resolves_at, updated_at,
+      asset, expiry_ts, predicate_direction, predicate_threshold, predicate_type)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?)
+    ON CONFLICT(venue, venue_market_id) DO UPDATE SET
+      question = excluded.question,
+      url = excluded.url,
+      status = excluded.status,
+      yes_token_id = excluded.yes_token_id,
+      no_token_id = excluded.no_token_id,
+      resolves_at = excluded.resolves_at,
+      updated_at = datetime('now'),
+      asset = excluded.asset,
+      expiry_ts = excluded.expiry_ts,
+      predicate_direction = excluded.predicate_direction,
+      predicate_threshold = excluded.predicate_threshold,
+      predicate_type = excluded.predicate_type
+  `);
+
+  const pmMarkets = await fetchPolymarketCryptoMarkets();
+  for (const m of pmMarkets) {
+    const cf = m.cryptoFields;
+    upsert.run(
+      uuid(), 'POLYMARKET', m.venueMarketId, m.question,
+      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
+      m.resolvesAt || null,
+      cf?.asset ?? null, cf?.expiryTs ?? null,
+      cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
+      cf?.predicateType ?? null,
+    );
+  }
+
+  const kalshiMarkets = await fetchKalshiCryptoMarkets();
+  for (const m of kalshiMarkets) {
+    const cf = m.cryptoFields;
+    upsert.run(
+      uuid(), 'KALSHI', m.venueMarketId, m.question,
+      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
+      m.resolvesAt || null,
+      cf?.asset ?? null, cf?.expiryTs ?? null,
+      cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
+      cf?.predicateType ?? null,
+    );
+  }
+
+  console.log(`[ingestion] Crypto markets refreshed: PM=${pmMarkets.length}, Kalshi=${kalshiMarkets.length}`);
   return { polymarket: pmMarkets.length, kalshi: kalshiMarkets.length };
 }
 

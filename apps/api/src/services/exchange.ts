@@ -1,71 +1,65 @@
 /**
- * Exchange service — wraps pmxtjs to provide unified market data access.
- * Controlled by EXCHANGE_MODE env var:
- *   - 'live' (default): uses pmxt sidecar for real data; fails fast if unavailable
- *   - 'mock': returns mock data without contacting exchanges
+ * Exchange service — direct REST API clients for Polymarket and Kalshi.
+ *
+ * Bypasses pmxtjs/pmxt-core sidecar entirely. The sidecar crashes on Node 18+
+ * because @polymarket/clob-client is ESM-only and pmxt-core tries to require() it.
+ *
+ * Uses public, unauthenticated read-only endpoints:
+ *   Polymarket markets:    https://gamma-api.polymarket.com/markets
+ *   Polymarket orderbook:  https://clob.polymarket.com/book?token_id=...
+ *   Kalshi markets+prices: https://api.elections.kalshi.com/trade-api/v2/markets
+ *   (Kalshi embeds yes_ask_dollars/no_ask_dollars in the market object — no separate OB call)
+ *
+ * EXCHANGE_MODE=live|mock (default: live)
  */
 
-import { Polymarket, Kalshi } from 'pmxtjs';
+/* eslint-disable @typescript-eslint/no-var-requires */
+const https = require('https');
+const http = require('http');
 
-type ExchangeMode = 'live' | 'mock';
+const PM_GAMMA_URL = (process.env.PM_GAMMA_URL || 'https://gamma-api.polymarket.com').replace(/\/$/, '');
+const PM_CLOB_URL = (process.env.PM_CLOB_URL || 'https://clob.polymarket.com').replace(/\/$/, '');
+const KALSHI_API_URL = (process.env.KALSHI_API_URL || 'https://api.elections.kalshi.com/trade-api/v2').replace(/\/$/, '');
 
-function getExchangeMode(): ExchangeMode {
+export function getExchangeMode(): 'live' | 'mock' {
   const mode = (process.env.EXCHANGE_MODE || 'live').toLowerCase();
   if (mode !== 'live' && mode !== 'mock') {
     throw new Error(`Invalid EXCHANGE_MODE: '${mode}'. Must be 'live' or 'mock'.`);
   }
-  return mode as ExchangeMode;
+  return mode as 'live' | 'mock';
 }
 
-let polymarket: InstanceType<typeof Polymarket> | null = null;
-let kalshi: InstanceType<typeof Kalshi> | null = null;
-let initAttempted = false;
-let initSuccess = false;
+// ── HTTP helper ──────────────────────────────────────────────────────────────
 
-async function ensureInit(): Promise<boolean> {
-  if (initAttempted) return initSuccess;
-  initAttempted = true;
-
-  const mode = getExchangeMode();
-  if (mode === 'mock') {
-    console.log('[exchange] EXCHANGE_MODE=mock — using mock data');
-    return false;
-  }
-
-  try {
-    polymarket = new Polymarket();
-    kalshi = new Kalshi();
-
-    // Test connectivity with a simple call (10s timeout)
-    await Promise.race([
-      polymarket.fetchMarkets({ limit: 1 }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('pmxt sidecar timeout (10s)')), 10000),
-      ),
-    ]);
-
-    console.log('[exchange] pmxt connected successfully (live mode)');
-    initSuccess = true;
-    return true;
-  } catch (err) {
-    // FAIL FAST in live mode — do not silently fall back to mock
-    const msg = `[exchange] EXCHANGE_MODE=live but pmxt sidecar is unreachable. ` +
-      `Set EXCHANGE_MODE=mock for development, or ensure pmxt-core is installed. Error: ${err}`;
-    console.error(msg);
-    polymarket = null;
-    kalshi = null;
-    throw new Error(msg);
-  }
+function fetchJson(url: string, timeoutMs = 15000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https') ? https : http;
+    const req = client.get(
+      url,
+      { headers: { Accept: 'application/json', 'User-Agent': 'prediction-arb-bot/1.2' } },
+      (res: any) => {
+        // Follow redirects
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          return fetchJson(res.headers.location, timeoutMs).then(resolve).catch(reject);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+        }
+        let data = '';
+        res.on('data', (chunk: any) => { data += chunk; });
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+        });
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error(`Timeout after ${timeoutMs}ms: ${url}`)));
+    req.on('error', reject);
+  });
 }
 
-/**
- * Test exchange connectivity. Call at startup to fail fast.
- */
-export async function testExchangeConnectivity(): Promise<void> {
-  await ensureInit();
-}
-
-// ── Interfaces ──
+// ── Public interfaces ────────────────────────────────────────────────────────
 
 export interface NormalizedMarket {
   venueMarketId: string;
@@ -86,83 +80,169 @@ export interface NormalizedOrderbook {
   raw: any;
 }
 
-// ── Polymarket ──
+// ── Connectivity check ───────────────────────────────────────────────────────
 
+/**
+ * Test live exchange connectivity. Called at startup — throws if both fail.
+ */
+export async function testExchangeConnectivity(): Promise<void> {
+  if (getExchangeMode() === 'mock') {
+    console.log('[exchange] EXCHANGE_MODE=mock — skipping connectivity check');
+    return;
+  }
+
+  let pmOk = false;
+  let kalshiOk = false;
+
+  try {
+    await fetchJson(`${PM_GAMMA_URL}/markets?limit=1&active=true&closed=false`);
+    pmOk = true;
+    console.log('[exchange] Polymarket API reachable');
+  } catch (err) {
+    console.error('[exchange] Polymarket API unreachable:', err);
+  }
+
+  try {
+    await fetchJson(`${KALSHI_API_URL}/markets?limit=1&status=open`);
+    kalshiOk = true;
+    console.log('[exchange] Kalshi API reachable');
+  } catch (err) {
+    console.error('[exchange] Kalshi API unreachable:', err);
+  }
+
+  if (!pmOk && !kalshiOk) {
+    throw new Error(
+      '[exchange] EXCHANGE_MODE=live but both Polymarket and Kalshi APIs are unreachable. ' +
+      'Check your network or set EXCHANGE_MODE=mock for development.',
+    );
+  }
+}
+
+// ── Polymarket ───────────────────────────────────────────────────────────────
+
+/**
+ * Fetch active Polymarket markets from Gamma API.
+ * Returns clobTokenIds[0] as yesTokenId, clobTokenIds[1] as noTokenId.
+ */
 export async function fetchPolymarketMarkets(
   query?: string,
   limit = 25,
 ): Promise<NormalizedMarket[]> {
-  const live = await ensureInit();
-  if (!live) return getMockMarkets('POLYMARKET');
+  if (getExchangeMode() === 'mock') return getMockMarkets('POLYMARKET');
 
   try {
-    const markets = await polymarket!.fetchMarkets({
-      query,
-      limit,
-      status: 'open',
+    const params = new URLSearchParams({
+      active: 'true',
+      closed: 'false',
+      enableOrderBook: 'true',  // only CLOB markets have YES/NO tokenIds we can trade
+      order: 'liquidityClob',
+      ascending: 'false',
+      limit: String(limit),
     });
-    return markets.map((m: any) => ({
-      venueMarketId: m.marketId || m.id,
-      question: m.title || m.question || '',
-      url: m.url || '',
-      status: m.status || 'open',
-      yesTokenId: m.yes?.outcomeId || m.outcomes?.[0]?.outcomeId,
-      noTokenId: m.no?.outcomeId || m.outcomes?.[1]?.outcomeId,
-      resolvesAt: m.resolutionDate?.toISOString?.() || m.endDate || m.resolvesAt,
-    }));
+    if (query) params.set('q', query);
+
+    const data = await fetchJson(`${PM_GAMMA_URL}/markets?${params}`);
+    const markets: any[] = Array.isArray(data) ? data : data.markets || [];
+
+    return markets
+      .map((m: any) => {
+        // clobTokenIds arrives as a JSON-encoded string from the Gamma API
+        let tokenIds: string[] = [];
+        try {
+          tokenIds = typeof m.clobTokenIds === 'string'
+            ? JSON.parse(m.clobTokenIds)
+            : (m.clobTokenIds || []);
+        } catch { /* skip malformed */ }
+        return { m, tokenIds };
+      })
+      .filter(({ tokenIds }: any) => tokenIds.length >= 2)
+      .map(({ m, tokenIds }: any) => ({
+        venueMarketId: m.conditionId || m.id || m.marketId,
+        question: m.question || m.title || '',
+        url: `https://polymarket.com/event/${m.slug || m.conditionId}`,
+        status: m.active ? 'open' : 'closed',
+        yesTokenId: tokenIds[0],
+        noTokenId: tokenIds[1],
+        resolvesAt: m.endDateIso || m.endDate || undefined,
+      }));
   } catch (err) {
     console.error('[exchange] Polymarket fetchMarkets error:', err);
     return [];
   }
 }
 
-export async function fetchPolymarketOrderbook(
-  tokenId: string,
-): Promise<NormalizedOrderbook> {
-  const live = await ensureInit();
-  if (!live) return getMockOrderbook();
-
-  try {
-    const ob = await polymarket!.fetchOrderBook(tokenId);
-    const bids = ob.bids || [];
-    const asks = ob.asks || [];
-    return {
-      bestYesBid: bids.length > 0 ? Math.max(...bids.map((b: any) => b.price)) : null,
-      bestYesAsk: asks.length > 0 ? Math.min(...asks.map((a: any) => a.price)) : null,
-      bestNoBid: null,
-      bestNoAsk: null,
-      depth: [...bids, ...asks].map((l: any) => ({
-        price: l.price,
-        size: l.size,
-      })),
-      raw: ob,
-    };
-  } catch (err) {
-    console.error('[exchange] Polymarket orderbook error:', err);
-    if (getExchangeMode() === 'live') throw err;
-    return getMockOrderbook();
-  }
+/**
+ * Fetch Polymarket orderbook for a single token (YES or NO side).
+ * @deprecated Use fetchPolymarketBinaryOrderbook for arb detection.
+ */
+export async function fetchPolymarketOrderbook(tokenId: string): Promise<NormalizedOrderbook> {
+  if (getExchangeMode() === 'mock') return getMockOrderbook();
+  return fetchPolymarketBinaryOrderbook(tokenId, tokenId);
 }
 
-// ── Kalshi ──
+/**
+ * Fetch both YES and NO orderbooks from Polymarket CLOB in parallel.
+ * bestYesAsk = best ask on the YES token's book (cost to buy YES)
+ * bestNoAsk  = best ask on the NO token's book  (cost to buy NO)
+ */
+export async function fetchPolymarketBinaryOrderbook(
+  yesTokenId: string,
+  noTokenId: string,
+): Promise<NormalizedOrderbook> {
+  if (getExchangeMode() === 'mock') return getMockOrderbook();
 
+  const [yesOb, noOb] = await Promise.all([
+    fetchJson(`${PM_CLOB_URL}/book?token_id=${encodeURIComponent(yesTokenId)}`),
+    fetchJson(`${PM_CLOB_URL}/book?token_id=${encodeURIComponent(noTokenId)}`),
+  ]);
+
+  const yesBids: any[] = yesOb.bids || [];
+  const yesAsks: any[] = yesOb.asks || [];
+  const noBids: any[]  = noOb.bids  || [];
+  const noAsks: any[]  = noOb.asks  || [];
+
+  const bestYesBid = yesBids.length > 0 ? Math.max(...yesBids.map((b: any) => Number(b.price))) : null;
+  const bestYesAsk = yesAsks.length > 0 ? Math.min(...yesAsks.map((a: any) => Number(a.price))) : null;
+  const bestNoBid  = noBids.length  > 0 ? Math.max(...noBids.map((b: any) => Number(b.price)))  : null;
+  const bestNoAsk  = noAsks.length  > 0 ? Math.min(...noAsks.map((a: any) => Number(a.price)))  : null;
+
+  return {
+    bestYesBid,
+    bestYesAsk,
+    bestNoBid,
+    bestNoAsk,
+    depth: [...yesAsks, ...noBids].map((l: any) => ({ price: Number(l.price), size: Number(l.size) })),
+    raw: { yes: yesOb, no: noOb },
+  };
+}
+
+// ── Kalshi ───────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch open Kalshi markets. Kalshi embeds yes/no prices in the market object,
+ * so yesTokenId = noTokenId = ticker (used as the "outcome ID" for both sides).
+ */
 export async function fetchKalshiMarkets(
   query?: string,
   limit = 25,
 ): Promise<NormalizedMarket[]> {
-  const live = await ensureInit();
-  if (!live) return getMockMarkets('KALSHI');
+  if (getExchangeMode() === 'mock') return getMockMarkets('KALSHI');
 
   try {
-    const markets = await kalshi!.fetchMarkets({ query, limit, status: 'open' });
+    const params = new URLSearchParams({ status: 'open', limit: String(limit) });
+    if (query) params.set('series_ticker', query);
+
+    const data = await fetchJson(`${KALSHI_API_URL}/markets?${params}`);
+    const markets: any[] = data.markets || [];
+
     return markets.map((m: any) => ({
-      venueMarketId: m.marketId || m.ticker || m.id,
+      venueMarketId: m.ticker,
       question: m.title || m.question || '',
-      url: m.url || '',
+      url: `https://kalshi.com/markets/${m.ticker}`,
       status: m.status || 'open',
-      yesTokenId: m.yes?.outcomeId || m.outcomes?.[0]?.outcomeId,
-      noTokenId: m.no?.outcomeId || m.outcomes?.[1]?.outcomeId,
-      resolvesAt: m.resolutionDate?.toISOString?.() || m.endDate || m.resolvesAt,
+      yesTokenId: m.ticker,  // Kalshi uses ticker for both YES and NO sides
+      noTokenId: m.ticker,
+      resolvesAt: m.close_time || m.expiration_time || undefined,
     }));
   } catch (err) {
     console.error('[exchange] Kalshi fetchMarkets error:', err);
@@ -170,104 +250,49 @@ export async function fetchKalshiMarkets(
   }
 }
 
-export async function fetchKalshiOrderbook(
-  marketId: string,
-): Promise<NormalizedOrderbook> {
-  const live = await ensureInit();
-  if (!live) return getMockOrderbook();
-
-  try {
-    const ob = await kalshi!.fetchOrderBook(marketId);
-    const bids = ob.bids || [];
-    const asks = ob.asks || [];
-    return {
-      bestYesBid: bids.length > 0 ? Math.max(...bids.map((b: any) => b.price)) : null,
-      bestYesAsk: asks.length > 0 ? Math.min(...asks.map((a: any) => a.price)) : null,
-      bestNoBid: null,
-      bestNoAsk: null,
-      depth: [...bids, ...asks].map((l: any) => ({
-        price: l.price,
-        size: l.size,
-      })),
-      raw: ob,
-    };
-  } catch (err) {
-    console.error('[exchange] Kalshi orderbook error:', err);
-    if (getExchangeMode() === 'live') throw err;
-    return getMockOrderbook();
-  }
+/**
+ * Fetch Kalshi binary orderbook.
+ * Kalshi embeds yes_ask_dollars/no_ask_dollars directly in the market response — no
+ * separate orderbook endpoint needed.
+ * @deprecated Use fetchKalshiBinaryOrderbook.
+ */
+export async function fetchKalshiOrderbook(marketId: string): Promise<NormalizedOrderbook> {
+  if (getExchangeMode() === 'mock') return getMockOrderbook();
+  return fetchKalshiBinaryOrderbook(marketId, marketId);
 }
-
-// ── Binary orderbook fetch (YES + NO) ──
 
 /**
- * Fetch both YES and NO orderbooks for a binary market on a given venue.
- * This is the correct way to get full pricing for arb detection:
- *   - bestYesAsk = cost to buy YES (from the YES outcome's orderbook)
- *   - bestNoAsk  = cost to buy NO  (from the NO outcome's orderbook)
+ * Fetch Kalshi binary orderbook. Both yesOutcomeId and noOutcomeId should be the
+ * market ticker (they are the same for Kalshi). Prices are read from the market
+ * object's yes_ask_dollars / no_ask_dollars fields.
  */
-async function fetchBinaryOb(
-  exchange: any,
-  yesOutcomeId: string,
-  noOutcomeId: string,
-  venueName: string,
-): Promise<NormalizedOrderbook> {
-  const [yesOb, noOb] = await Promise.all([
-    exchange.fetchOrderBook(yesOutcomeId),
-    exchange.fetchOrderBook(noOutcomeId),
-  ]);
-
-  const yesBids = yesOb.bids || [];
-  const yesAsks = yesOb.asks || [];
-  const noBids = noOb.bids || [];
-  const noAsks = noOb.asks || [];
-
-  return {
-    bestYesBid: yesBids.length > 0 ? Math.max(...yesBids.map((b: any) => b.price)) : null,
-    bestYesAsk: yesAsks.length > 0 ? Math.min(...yesAsks.map((a: any) => a.price)) : null,
-    bestNoBid: noBids.length > 0 ? Math.max(...noBids.map((b: any) => b.price)) : null,
-    bestNoAsk: noAsks.length > 0 ? Math.min(...noAsks.map((a: any) => a.price)) : null,
-    depth: [...yesAsks, ...noAsks, ...yesBids, ...noBids].map((l: any) => ({
-      price: l.price,
-      size: l.size,
-    })),
-    raw: { yes: yesOb, no: noOb },
-  };
-}
-
-export async function fetchPolymarketBinaryOrderbook(
-  yesTokenId: string,
-  noTokenId: string,
-): Promise<NormalizedOrderbook> {
-  const live = await ensureInit();
-  if (!live) return getMockOrderbook();
-
-  try {
-    return await fetchBinaryOb(polymarket!, yesTokenId, noTokenId, 'Polymarket');
-  } catch (err) {
-    console.error('[exchange] Polymarket binary orderbook error:', err);
-    if (getExchangeMode() === 'live') throw err;
-    return getMockOrderbook();
-  }
-}
-
 export async function fetchKalshiBinaryOrderbook(
   yesOutcomeId: string,
   noOutcomeId: string,
 ): Promise<NormalizedOrderbook> {
-  const live = await ensureInit();
-  if (!live) return getMockOrderbook();
+  if (getExchangeMode() === 'mock') return getMockOrderbook();
 
-  try {
-    return await fetchBinaryOb(kalshi!, yesOutcomeId, noOutcomeId, 'Kalshi');
-  } catch (err) {
-    console.error('[exchange] Kalshi binary orderbook error:', err);
-    if (getExchangeMode() === 'live') throw err;
-    return getMockOrderbook();
-  }
+  // Both sides come from the same market — use yesOutcomeId (= ticker)
+  const ticker = yesOutcomeId;
+  const data = await fetchJson(`${KALSHI_API_URL}/markets/${encodeURIComponent(ticker)}`);
+  const m = data.market || data;
+
+  const bestYesAsk = m.yes_ask  != null ? Number(m.yes_ask)  : m.yes_ask_dollars  != null ? Number(m.yes_ask_dollars)  : null;
+  const bestYesBid = m.yes_bid  != null ? Number(m.yes_bid)  : m.yes_bid_dollars  != null ? Number(m.yes_bid_dollars)  : null;
+  const bestNoAsk  = m.no_ask   != null ? Number(m.no_ask)   : m.no_ask_dollars   != null ? Number(m.no_ask_dollars)   : null;
+  const bestNoBid  = m.no_bid   != null ? Number(m.no_bid)   : m.no_bid_dollars   != null ? Number(m.no_bid_dollars)   : null;
+
+  return {
+    bestYesBid,
+    bestYesAsk,
+    bestNoBid,
+    bestNoAsk,
+    depth: [],  // Kalshi doesn't expose depth levels in this endpoint
+    raw: m,
+  };
 }
 
-// ── Mock data for development ──
+// ── Mock data ────────────────────────────────────────────────────────────────
 
 function getMockMarkets(venue: string): NormalizedMarket[] {
   return [
@@ -276,25 +301,29 @@ function getMockMarkets(venue: string): NormalizedMarket[] {
       question: 'Will Bitcoin reach $100k by end of 2026?',
       url: `https://${venue.toLowerCase()}.com/mock`,
       status: 'open',
+      yesTokenId: venue === 'POLYMARKET' ? 'pm-mock-yes-btc' : 'kalshi-mock-btc-100k',
+      noTokenId:  venue === 'POLYMARKET' ? 'pm-mock-no-btc'  : 'kalshi-mock-btc-100k',
     },
     {
       venueMarketId: venue === 'POLYMARKET' ? 'pm-mock-fed-rate' : 'kalshi-mock-fed-rate',
       question: 'Will the Fed cut rates in June 2026?',
       url: `https://${venue.toLowerCase()}.com/mock`,
       status: 'open',
+      yesTokenId: venue === 'POLYMARKET' ? 'pm-mock-yes-fed' : 'kalshi-mock-fed-rate',
+      noTokenId:  venue === 'POLYMARKET' ? 'pm-mock-no-fed'  : 'kalshi-mock-fed-rate',
     },
   ];
 }
 
 function getMockOrderbook(): NormalizedOrderbook {
-  const yesPrice = 0.4 + Math.random() * 0.2; // 0.40-0.60
+  const yesPrice = 0.4 + Math.random() * 0.2; // 0.40–0.60
   return {
-    bestYesBid: yesPrice - 0.02,
-    bestYesAsk: yesPrice,
-    bestNoBid: 1 - yesPrice - 0.02,
-    bestNoAsk: 1 - yesPrice + 0.01,
+    bestYesBid: +(yesPrice - 0.02).toFixed(4),
+    bestYesAsk: +yesPrice.toFixed(4),
+    bestNoBid:  +(1 - yesPrice - 0.02).toFixed(4),
+    bestNoAsk:  +(1 - yesPrice + 0.01).toFixed(4),
     depth: [
-      { price: yesPrice, size: 500 },
+      { price: yesPrice,        size: 500  },
       { price: yesPrice - 0.01, size: 1000 },
       { price: yesPrice - 0.02, size: 2000 },
     ],

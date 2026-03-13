@@ -1,94 +1,100 @@
 /**
- * Smoke test: verify live exchange connectivity via pmxt.
- * Connects to both Polymarket and Kalshi, fetches markets + orderbooks,
- * prints normalized quotes, exits non-zero on failure.
+ * Smoke test: verify live exchange connectivity via direct REST APIs.
+ * No pmxtjs/sidecar required — uses public Polymarket + Kalshi HTTP endpoints.
  *
  * Usage: npm run smoke:live
+ * Exits non-zero on failure.
  */
 
-import { Polymarket, Kalshi } from 'pmxtjs';
+import {
+  fetchPolymarketMarkets,
+  fetchPolymarketBinaryOrderbook,
+  fetchKalshiMarkets,
+  fetchKalshiBinaryOrderbook,
+} from '../services/exchange';
 
-function formatPrice(p: number): string {
-  return (p * 100).toFixed(1) + '%';
+// Force live mode for this script
+process.env.EXCHANGE_MODE = 'live';
+
+function fmt(p: number | null): string {
+  return p != null ? (p * 100).toFixed(1) + '%' : 'N/A';
 }
 
 async function main() {
-  console.log('=== Smoke Test: Live Exchange Connectivity ===\n');
+  console.log('=== Smoke Test: Live Exchange Connectivity (direct REST) ===\n');
 
-  const poly = new Polymarket();
-  const kalshi = new Kalshi();
+  let passed = true;
 
-  // ── Polymarket ──
+  // ── Polymarket ──────────────────────────────────────────────────────────────
   console.log('[Polymarket] Fetching markets...');
-  const pmMarkets = await poly.fetchMarkets({ limit: 3, sort: 'volume' });
+  const pmMarkets = await fetchPolymarketMarkets(undefined, 3);
   console.log(`  Found ${pmMarkets.length} markets`);
-  if (pmMarkets.length === 0) throw new Error('No Polymarket markets found');
 
-  for (const market of pmMarkets) {
-    console.log(`\n  Market: "${market.title}"`);
-    console.log(`  ID: ${market.marketId}`);
-    console.log(`  Outcomes: ${market.outcomes.map((o: any) => `${o.label}(${o.outcomeId?.slice(0, 12)}...)`).join(', ')}`);
+  if (pmMarkets.length === 0) {
+    console.error('  ERROR: No Polymarket markets returned');
+    passed = false;
+  } else {
+    for (const m of pmMarkets) {
+      console.log(`\n  Market: "${m.question}"`);
+      console.log(`  conditionId: ${m.venueMarketId}`);
+      console.log(`  YES token: ${m.yesTokenId?.slice(0, 16)}...`);
+      console.log(`  NO  token: ${m.noTokenId?.slice(0, 16)}...`);
 
-    if (market.outcomes.length >= 2) {
-      const yesId = market.outcomes[0].outcomeId;
-      const noId = market.outcomes[1].outcomeId;
-
-      const [yesOb, noOb] = await Promise.all([
-        poly.fetchOrderBook(yesId),
-        poly.fetchOrderBook(noId),
-      ]);
-
-      const yesAsk = yesOb.asks.length > 0 ? Math.min(...yesOb.asks.map((a: any) => a.price)) : null;
-      const noAsk = noOb.asks.length > 0 ? Math.min(...noOb.asks.map((a: any) => a.price)) : null;
-
-      console.log(`  YES: ${yesOb.bids.length} bids, ${yesOb.asks.length} asks | best ask: ${yesAsk ? formatPrice(yesAsk) : 'N/A'}`);
-      console.log(`  NO:  ${noOb.bids.length} bids, ${noOb.asks.length} asks | best ask: ${noAsk ? formatPrice(noAsk) : 'N/A'}`);
-
-      if (yesAsk && noAsk) {
-        const total = yesAsk + noAsk;
-        console.log(`  Combined cost: ${formatPrice(total)} (${total < 1.0 ? 'ARB POSSIBLE' : 'no arb'})`);
+      if (m.yesTokenId && m.noTokenId) {
+        try {
+          const ob = await fetchPolymarketBinaryOrderbook(m.yesTokenId, m.noTokenId);
+          console.log(`  YES ask: ${fmt(ob.bestYesAsk)}  |  NO ask: ${fmt(ob.bestNoAsk)}`);
+          if (ob.bestYesAsk != null && ob.bestNoAsk != null) {
+            const total = ob.bestYesAsk + ob.bestNoAsk;
+            console.log(`  Combined cost: ${fmt(total)} (${total < 1.0 ? '⚡ ARB POSSIBLE' : 'no arb'})`);
+          }
+          if (ob.bestYesAsk == null || ob.bestNoAsk == null) {
+            console.warn('  WARN: null ask price — thin/empty orderbook');
+          }
+        } catch (err) {
+          console.error(`  ERROR fetching orderbook: ${err}`);
+          passed = false;
+        }
       }
     }
   }
 
-  // ── Kalshi ──
+  // ── Kalshi ──────────────────────────────────────────────────────────────────
   console.log('\n[Kalshi] Fetching markets...');
-  const kalshiMarkets = await kalshi.fetchMarkets({ limit: 3, sort: 'volume' });
+  const kalshiMarkets = await fetchKalshiMarkets(undefined, 3);
   console.log(`  Found ${kalshiMarkets.length} markets`);
-  if (kalshiMarkets.length === 0) throw new Error('No Kalshi markets found');
 
-  for (const market of kalshiMarkets) {
-    console.log(`\n  Market: "${market.title}"`);
-    console.log(`  ID: ${market.marketId}`);
-    console.log(`  Outcomes: ${market.outcomes.map((o: any) => `${o.label}(${o.outcomeId})`).join(', ')}`);
+  if (kalshiMarkets.length === 0) {
+    console.error('  ERROR: No Kalshi markets returned');
+    passed = false;
+  } else {
+    for (const m of kalshiMarkets) {
+      console.log(`\n  Market: "${m.question}"`);
+      console.log(`  ticker: ${m.venueMarketId}`);
 
-    if (market.outcomes.length >= 2) {
-      const yesId = market.outcomes[0].outcomeId;
-      const noId = market.outcomes[1].outcomeId;
-
-      const [yesOb, noOb] = await Promise.all([
-        kalshi.fetchOrderBook(yesId),
-        kalshi.fetchOrderBook(noId),
-      ]);
-
-      const yesAsk = yesOb.asks.length > 0 ? Math.min(...yesOb.asks.map((a: any) => a.price)) : null;
-      const noAsk = noOb.asks.length > 0 ? Math.min(...noOb.asks.map((a: any) => a.price)) : null;
-
-      console.log(`  YES: ${yesOb.bids.length} bids, ${yesOb.asks.length} asks | best ask: ${yesAsk ? formatPrice(yesAsk) : 'N/A'}`);
-      console.log(`  NO:  ${noOb.bids.length} bids, ${noOb.asks.length} asks | best ask: ${noAsk ? formatPrice(noAsk) : 'N/A'}`);
-
-      if (yesAsk && noAsk) {
-        const total = yesAsk + noAsk;
-        console.log(`  Combined cost: ${formatPrice(total)} (${total < 1.0 ? 'ARB POSSIBLE' : 'no arb'})`);
+      try {
+        const ob = await fetchKalshiBinaryOrderbook(m.venueMarketId, m.venueMarketId);
+        console.log(`  YES ask: ${fmt(ob.bestYesAsk)}  |  NO ask: ${fmt(ob.bestNoAsk)}`);
+        if (ob.bestYesAsk != null && ob.bestNoAsk != null) {
+          const total = ob.bestYesAsk + ob.bestNoAsk;
+          console.log(`  Combined cost: ${fmt(total)} (${total < 1.0 ? '⚡ ARB POSSIBLE' : 'no arb'})`);
+        }
+        if (ob.bestYesAsk == null || ob.bestNoAsk == null) {
+          console.warn('  WARN: null ask price — check Kalshi market field names');
+        }
+      } catch (err) {
+        console.error(`  ERROR fetching orderbook: ${err}`);
+        passed = false;
       }
     }
   }
 
-  console.log('\n=== Smoke test PASSED ===');
+  console.log('\n' + (passed ? '=== Smoke test PASSED ===' : '=== Smoke test FAILED ==='));
+  if (!passed) process.exit(1);
 }
 
 main().catch((err) => {
   console.error('\n=== Smoke test FAILED ===');
-  console.error(err.message || err);
+  console.error(err?.message || err);
   process.exit(1);
 });

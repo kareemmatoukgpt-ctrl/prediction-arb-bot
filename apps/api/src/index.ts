@@ -22,7 +22,31 @@ app.use(express.json());
 
 // Health check
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', ts: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    ts: new Date().toISOString(),
+    exchangeMode: process.env.EXCHANGE_MODE || 'live',
+  });
+});
+
+// Debug: show token IDs per mapping (useful to verify live data is loaded)
+app.get('/api/debug/mappings', (_req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      mm.id, mm.label, mm.enabled,
+      pm.venue_market_id  AS pm_market_id,
+      pm.yes_token_id     AS pm_yes_token,
+      pm.no_token_id      AS pm_no_token,
+      k.venue_market_id   AS k_market_id,
+      k.yes_token_id      AS k_yes_token,
+      k.no_token_id       AS k_no_token
+    FROM match_mappings mm
+    JOIN canonical_markets pm ON mm.polymarket_market_id = pm.id
+    JOIN canonical_markets k  ON mm.kalshi_market_id    = k.id
+    ORDER BY mm.id
+  `).all();
+  res.json({ exchangeMode: process.env.EXCHANGE_MODE || 'live', mappings: rows });
 });
 
 // Routes

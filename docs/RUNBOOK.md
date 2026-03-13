@@ -52,6 +52,23 @@ The system will start scanning orderbooks for this pair automatically.
 - PnL is tracked cumulatively
 - Simulation parameters are configurable via environment variables
 
+## Exchange Mode
+
+The `EXCHANGE_MODE` environment variable controls whether the bot connects to real exchanges or uses fake data:
+
+| Mode | Behavior |
+|------|----------|
+| `live` (default) | Connects to Polymarket and Kalshi via the pmxt sidecar. **Fails fast** if pmxt is unreachable — the API server will exit with an error. |
+| `mock` | Uses hardcoded fake market/orderbook data. No external connections. Use this for local development or CI. |
+
+```bash
+# Development (no exchange connection needed)
+EXCHANGE_MODE=mock npm run dev:api
+
+# Production / real data
+EXCHANGE_MODE=live npm run dev:api
+```
+
 ## Troubleshooting
 
 ### No opportunities appearing
@@ -65,7 +82,8 @@ The system will start scanning orderbooks for this pair automatically.
 - Check port 3001 is not in use
 - Review console output for errors
 
-### pmxt connection issues
-- pmxt requires Node.js for its sidecar
-- If pmxt fails, the system falls back to mock data
-- Check npm logs for pmxt installation issues
+### API exits immediately with "pmxt sidecar unreachable"
+- This happens when `EXCHANGE_MODE=live` (the default) and pmxt cannot start
+- For development, set `EXCHANGE_MODE=mock` in your `.env` file
+- For real data, ensure `pmxtjs` and `pmxt-core` are installed (`npm install`)
+- The pmxt sidecar starts automatically when the SDK is used — no manual setup needed

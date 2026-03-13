@@ -10,6 +10,7 @@ import mappingsRouter from './routes/mappings';
 import marketsRouter from './routes/markets';
 import opportunitiesRouter from './routes/opportunities';
 import paperTradesRouter from './routes/paper-trades';
+import demoRouter from './routes/demo';
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT || '3001', 10);
@@ -28,6 +29,7 @@ app.use('/api/mappings', mappingsRouter);
 app.use('/api/markets', marketsRouter);
 app.use('/api/opportunities', opportunitiesRouter);
 app.use('/api/paper-trades', paperTradesRouter);
+app.use('/api/demo', demoRouter);
 
 // Initialize database
 getDb();

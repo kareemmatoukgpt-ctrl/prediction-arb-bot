@@ -49,6 +49,10 @@ export const getOpportunities = (params?: {
 export const scanOpportunities = () =>
   fetchApi('/api/opportunities/scan', { method: 'POST' });
 
+// Demo
+export const seedDemo = () => fetchApi('/api/demo/seed', { method: 'POST' });
+export const resetDemo = () => fetchApi('/api/demo/reset', { method: 'POST' });
+
 // Paper trades
 export const getPaperTrades = (limit?: number) =>
   fetchApi(`/api/paper-trades${limit ? `?limit=${limit}` : ''}`);

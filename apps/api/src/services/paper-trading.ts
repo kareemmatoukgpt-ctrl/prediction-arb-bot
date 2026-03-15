@@ -8,10 +8,17 @@ import { simulateExecution, ArbCheckResult, SimParams } from '@prediction-arb-bo
 export function executePaperTrade(opportunityId: string): any {
   const db = getDb();
 
-  const opp = db.prepare(`
+  let opp = db.prepare(`
     SELECT * FROM arb_opportunities WHERE id = ?
   `).get(opportunityId) as any;
 
+  if (!opp) {
+    // Try looking up via opportunity_feed (frontend passes feed IDs)
+    const feedItem = db.prepare('SELECT mapping_id, direction FROM opportunity_feed WHERE id = ?').get(opportunityId) as any;
+    if (feedItem) {
+      opp = db.prepare('SELECT * FROM arb_opportunities WHERE mapping_id = ? AND direction = ?').get(feedItem.mapping_id, feedItem.direction) as any;
+    }
+  }
   if (!opp) {
     throw new Error(`Opportunity not found: ${opportunityId}`);
   }
@@ -32,7 +39,7 @@ export function executePaperTrade(opportunityId: string): any {
     direction: opp.direction,
     costYes: opp.cost_yes,
     costNo: opp.cost_no,
-    totalCost: opp.cost_yes + opp.cost_no,
+    totalCost: opp.cost_yes + opp.cost_no,  // per-unit (consistent with ArbCheckResult)
     feesEstimate: opp.fees_estimate,
     slippageEstimate: opp.slippage_estimate,
     expectedProfitUSD: opp.expected_profit_usd,

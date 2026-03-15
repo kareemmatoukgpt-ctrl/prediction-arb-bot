@@ -6,9 +6,9 @@ import {
 
 /** Default cost model for V1 paper trading */
 export const DEFAULT_COST_PARAMS: CostModelParams = {
-  polymarketTakerFeeBps: 0,   // Polymarket: 0 taker fee on CLOB
-  kalshiTakerFeeBps: 0,       // Kalshi: varies by market, 0 for paper
-  slippageBps: 10,            // 10 bps expected slippage per side
+  polymarketTakerFeeBps: 100, // Polymarket: 100 bps taker fee
+  kalshiTakerFeeBps: 70,      // Kalshi: 70 bps taker fee
+  slippageBps: 50,            // 50 bps expected slippage per side
   arbThresholdBps: 50,        // require 50 bps minimum edge
 };
 
@@ -119,7 +119,7 @@ export function checkArbDirection(
     direction,
     costYes: yesAsk,
     costNo: noAsk,
-    totalCost: totalCostPerUnit * sizeUSD,
+    totalCost: totalCostPerUnit,
     feesEstimate,
     slippageEstimate,
     expectedProfitUSD,

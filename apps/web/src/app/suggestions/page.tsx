@@ -1,22 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { getSuggestions, generateSuggestions, runSmartMatch, approveSuggestion, rejectSuggestion } from '@/lib/api';
+import { formatExpiry } from '@/lib/utils';
 
 function ScoreBadge({ score }: { score: number }) {
   const cls = score >= 90 ? 'badge-green' : score >= 70 ? 'badge-yellow' : 'badge-red';
   return <span className={`badge ${cls}`}>{score}</span>;
-}
-
-function formatExpiry(ts: number | null): string {
-  if (!ts) return '\u2014';
-  const diff = ts - Math.floor(Date.now() / 1000);
-  if (diff < 0) return 'expired';
-  const d = Math.floor(diff / 86400);
-  const h = Math.floor((diff % 86400) / 3600);
-  const m = Math.floor((diff % 3600) / 60);
-  if (d > 0) return `in ${d}d ${h}h`;
-  if (h > 0) return `in ${h}h ${m}m`;
-  return `in ${m}m`;
 }
 
 function parseReasons(json: string): string[] {
@@ -117,6 +106,7 @@ export default function SuggestionsPage() {
   const [asset, setAsset] = useState('');
   const [showApproved, setShowApproved] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [smartMatching, setSmartMatching] = useState(false);
   const [genMsg, setGenMsg] = useState('');
   const [actionMsg, setActionMsg] = useState<{ id: string; msg: string; ok: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,10 +172,12 @@ export default function SuggestionsPage() {
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '0.5rem 1rem',
     cursor: 'pointer',
+    borderTop: 'none',
+    borderLeft: 'none',
+    borderRight: 'none',
     borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
     color: active ? 'var(--text)' : 'var(--text-muted)',
     background: 'none',
-    border: 'none',
     fontSize: '0.9rem',
   });
 
@@ -209,19 +201,19 @@ export default function SuggestionsPage() {
             <input type="checkbox" checked={showApproved} onChange={e => setShowApproved(e.target.checked)} />
             Show approved
           </label>
-          <button className="btn" onClick={handleGenerate} disabled={generating}>
+          <button className="btn" onClick={handleGenerate} disabled={generating || smartMatching}>
             {generating ? 'Generating\u2026' : 'Generate'}
           </button>
           <button className="btn btn-primary" onClick={async () => {
-            setGenerating(true); setGenMsg('');
+            setSmartMatching(true); setGenMsg('');
             try {
               const result = await runSmartMatch();
               setGenMsg(`Smart match: ${result.arb_eligible ?? 0} arb-eligible, ${result.research ?? 0} research (${result.processed} pairs checked)`);
               await load();
             } catch (err: any) { setGenMsg(`Error: ${err.message}`); }
-            finally { setGenerating(false); }
-          }} disabled={generating}>
-            {generating ? 'Matching\u2026' : 'Smart Match (AI)'}
+            finally { setSmartMatching(false); }
+          }} disabled={generating || smartMatching}>
+            {smartMatching ? 'Matching\u2026' : 'Smart Match (AI)'}
           </button>
         </div>
       </div>
@@ -258,7 +250,7 @@ export default function SuggestionsPage() {
       )}
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Loading\u2026</div>
+        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Loading&hellip;</div>
       ) : tab === 'discovery' ? (
         discoverySuggestions.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
@@ -268,7 +260,6 @@ export default function SuggestionsPage() {
           <div>
             {discoverySuggestions.map((s: any) => {
               const reasons = parseReasons(s.reasons_json);
-              // Find the "Research-only" reason which tells us why it's not arb-eligible
               const blockReason = reasons.find(r => r.startsWith('Research-only:'));
               return (
                 <div key={s.id} className="card" style={{ marginBottom: '1rem', borderColor: 'var(--border)' }}>

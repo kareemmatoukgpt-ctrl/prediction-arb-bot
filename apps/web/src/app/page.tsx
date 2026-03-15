@@ -1,24 +1,9 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { getFeed, getFeedStats, executePaperTrade } from '@/lib/api';
+import { formatExpiry, stripMarkdown } from '@/lib/utils';
 import Link from 'next/link';
-
-function stripMarkdown(text: string): string {
-  return text.replace(/\*\*/g, '');
-}
-
-function formatExpiry(ts: number | null): string {
-  if (!ts) return '';
-  const diff = ts - Math.floor(Date.now() / 1000);
-  if (diff < 0) return 'expired';
-  const d = Math.floor(diff / 86400);
-  const h = Math.floor((diff % 86400) / 3600);
-  const m = Math.floor((diff % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 function DirectionBadge({ direction }: { direction: string }) {
   if (direction === 'BUY_YES_PM_BUY_NO_KALSHI') {
@@ -47,42 +32,29 @@ export default function FeedPage() {
   const [sort, setSort] = useState('profit_desc');
   const [showSuspect, setShowSuspect] = useState(false);
   const [apiOk, setApiOk] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
-  const loadingRef = useRef(false);
 
   async function load() {
-    // Prevent overlapping fetches
-    if (loadingRef.current) return;
-    loadingRef.current = true;
     try {
-      // Fetch feed and stats independently so one failure doesn't kill both
-      const feedPromise = getFeed({
-        category: category || undefined,
-        minEdgeBps: minEdge || undefined,
-        sort,
-        hideSuspect: !showSuspect,
-        limit: 50,
-      });
-      const statsPromise = getFeedStats();
-
-      const feed = await feedPromise.catch(() => null);
-      const feedStats = await statsPromise.catch(() => null);
-
-      // Only update state if we got valid data — never clear on failure
-      if (feed !== null) {
-        setOpps(Array.isArray(feed) ? feed : []);
-        setApiOk(true);
-      }
-      if (feedStats !== null) {
-        setStats(feedStats);
-        setApiOk(true);
-      }
-      if (feed === null && feedStats === null) {
-        setApiOk(false);
-      }
+      const [feed, feedStats] = await Promise.all([
+        getFeed({
+          category: category || undefined,
+          minEdgeBps: minEdge || undefined,
+          sort,
+          hideSuspect: !showSuspect,
+          limit: 50,
+        }),
+        getFeedStats(),
+      ]);
+      setOpps(Array.isArray(feed) ? feed : []);
+      setStats(feedStats);
+      setApiOk(true);
+    } catch {
+      setApiOk(false);
     } finally {
-      loadingRef.current = false;
+      setLoading(false);
     }
   }
 
@@ -197,7 +169,9 @@ export default function FeedPage() {
       )}
 
       {/* Feed cards */}
-      {opps.length === 0 ? (
+      {loading ? (
+        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading feed...</div>
+      ) : opps.length === 0 ? (
         <div className="card empty-state">
           <h2>No opportunities detected</h2>
           <p>
@@ -258,8 +232,8 @@ export default function FeedPage() {
                   <div className="feed-edge">{opp.expected_profit_bps} bps</div>
                   <div className="feed-prices">
                     {opp.direction === 'BUY_YES_PM_BUY_NO_KALSHI'
-                      ? `PM: ${opp.pm_yes_ask?.toFixed(3)}c / K: ${opp.kalshi_no_ask?.toFixed(3)}c`
-                      : `PM: ${opp.pm_no_ask?.toFixed(3)}c / K: ${opp.kalshi_yes_ask?.toFixed(3)}c`
+                      ? `PM: ${(opp.pm_yes_ask * 100)?.toFixed(1)}¢ / K: ${(opp.kalshi_no_ask * 100)?.toFixed(1)}¢`
+                      : `PM: ${(opp.pm_no_ask * 100)?.toFixed(1)}¢ / K: ${(opp.kalshi_yes_ask * 100)?.toFixed(1)}¢`
                     }
                   </div>
                   <div className="feed-actions">

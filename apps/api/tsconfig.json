@@ -15,7 +15,8 @@
     "paths": {
       "@prediction-arb-bot/core": ["../../packages/core/src"]
     },
-    "baseUrl": "."
+    "baseUrl": ".",
+    "composite": true
   },
   "include": ["src"],
   "references": [

@@ -28,8 +28,18 @@ export const deleteMapping = (id: string) =>
   fetchApi(`/api/mappings/${id}`, { method: 'DELETE' });
 
 // Markets
-export const getMarkets = (venue?: string) =>
-  fetchApi(`/api/markets${venue ? `?venue=${venue}` : ''}`);
+export const getMarkets = (params?: {
+  venue?: string; asset?: string; category?: string; search?: string; limit?: number; structured?: string;
+}) => {
+  const qs = new URLSearchParams();
+  if (params?.venue) qs.set('venue', params.venue);
+  if (params?.asset) qs.set('asset', params.asset);
+  if (params?.category) qs.set('category', params.category);
+  if (params?.search) qs.set('search', params.search);
+  if (params?.limit != null) qs.set('limit', String(params.limit));
+  if (params?.structured) qs.set('structured', params.structured);
+  return fetchApi(`/api/markets?${qs}`);
+};
 export const refreshMarkets = () =>
   fetchApi('/api/markets/refresh', { method: 'POST' });
 
@@ -80,7 +90,7 @@ export const getSuggestions = (params: {
   const qs = new URLSearchParams();
   if (params.asset) qs.set('asset', params.asset);
   if (params.minScore != null) qs.set('minScore', String(params.minScore));
-  if (params.status !== undefined) qs.set('status', params.status);
+  if (params.status) qs.set('status', params.status);
   if (params.bucket) qs.set('bucket', params.bucket);
   if (params.limit != null) qs.set('limit', String(params.limit));
   return fetchApi(`/api/suggestions?${qs}`);

@@ -1,17 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ingestCrypto, ingestFed, ingestMacro } from '@/lib/api';
-
-function formatExpiry(expiryTs: number | null): string {
-  if (!expiryTs) return '—';
-  const diff = expiryTs - Math.floor(Date.now() / 1000);
-  if (diff < 0) return 'expired';
-  const h = Math.floor(diff / 3600);
-  const m = Math.floor((diff % 3600) / 60);
-  if (h > 24 * 7) return `${Math.floor(h / 24)}d`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
+import { getMarkets, ingestCrypto, ingestFed, ingestMacro } from '@/lib/api';
+import { formatExpiry } from '@/lib/utils';
 
 export default function MarketsPage() {
   const [markets, setMarkets] = useState<any[]>([]);
@@ -25,14 +15,13 @@ export default function MarketsPage() {
 
   async function load() {
     try {
-      const params: Record<string, string> = { limit: '200' };
-      if (venue) params.venue = venue;
-      if (asset) params.asset = asset;
-      if (category) params.category = category;
-      if (search) params.search = search;
-      const qs = new URLSearchParams(params);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-      const data = await fetch(`${API_BASE}/api/markets?${qs}`).then(r => r.json());
+      const data = await getMarkets({
+        venue: venue || undefined,
+        asset: asset || undefined,
+        category: category || undefined,
+        search: search || undefined,
+        limit: 200,
+      });
       setMarkets(Array.isArray(data) ? data : []);
     } catch {
       setMarkets([]);
@@ -52,11 +41,11 @@ export default function MarketsPage() {
     setIngesting(true);
     setIngestMsg('');
     try {
-      const result = await ingestCrypto();
-      setIngestMsg(`✅ Ingested ${result.polymarket} PM + ${result.kalshi} Kalshi crypto markets`);
-      await load();
+      await ingestCrypto();
+      setIngestMsg('Crypto ingestion started in background. Markets will appear as they are discovered.');
+      setTimeout(load, 5000);
     } catch (err: any) {
-      setIngestMsg(`❌ Error: ${err.message}`);
+      setIngestMsg(`Error: ${err.message}`);
     } finally {
       setIngesting(false);
     }
@@ -72,12 +61,12 @@ export default function MarketsPage() {
         <h1>Markets Explorer</h1>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button className="btn btn-sm" onClick={handleIngest} disabled={ingesting}>
-            {ingesting ? 'Ingesting…' : 'Ingest Crypto'}
+            {ingesting ? 'Ingesting\u2026' : 'Ingest Crypto'}
           </button>
-          <button className="btn btn-sm" onClick={async () => { setIngesting(true); try { const r = await ingestFed(); setIngestMsg(`Ingested ${r.kalshi} FED markets`); } catch (e: any) { setIngestMsg(e.message); } setIngesting(false); }} disabled={ingesting}>
+          <button className="btn btn-sm" onClick={async () => { setIngesting(true); try { await ingestFed(); setIngestMsg('FED ingestion started in background'); setTimeout(load, 3000); } catch (e: any) { setIngestMsg(e.message); } setIngesting(false); }} disabled={ingesting}>
             Ingest FED
           </button>
-          <button className="btn btn-sm" onClick={async () => { setIngesting(true); try { const r = await ingestMacro(); setIngestMsg(`Ingested ${r.kalshi} MACRO markets`); } catch (e: any) { setIngestMsg(e.message); } setIngesting(false); }} disabled={ingesting}>
+          <button className="btn btn-sm" onClick={async () => { setIngesting(true); try { await ingestMacro(); setIngestMsg('MACRO ingestion started in background'); setTimeout(load, 3000); } catch (e: any) { setIngestMsg(e.message); } setIngesting(false); }} disabled={ingesting}>
             Ingest MACRO
           </button>
         </div>
@@ -130,18 +119,18 @@ export default function MarketsPage() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search questions…"
+            placeholder="Search questions..."
             style={{ width: '100%' }}
           />
         </div>
       </div>
 
       {loading ? (
-        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Loading…</div>
+        <div style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Loading...</div>
       ) : markets.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
           <p>No markets found.</p>
-          <p style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>Click &ldquo;Ingest Crypto&rdquo; to fetch BTC/ETH/SOL markets from both venues.</p>
+          <p style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>Click "Ingest Crypto" to fetch BTC/ETH/SOL markets from both venues.</p>
         </div>
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -175,11 +164,11 @@ export default function MarketsPage() {
                   <td>
                     {m.asset
                       ? <span className="badge badge-blue">{m.asset}</span>
-                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      : <span style={{ color: 'var(--text-muted)' }}>&mdash;</span>}
                   </td>
-                  <td style={{ fontSize: '0.8rem' }}>{m.predicate_direction || '—'}</td>
+                  <td style={{ fontSize: '0.8rem' }}>{m.predicate_direction || '\u2014'}</td>
                   <td style={{ fontSize: '0.8rem' }}>
-                    {m.predicate_threshold != null ? `$${Number(m.predicate_threshold).toLocaleString()}` : '—'}
+                    {m.predicate_threshold != null ? `$${Number(m.predicate_threshold).toLocaleString()}` : '\u2014'}
                   </td>
                   <td style={{
                     fontSize: '0.8rem',

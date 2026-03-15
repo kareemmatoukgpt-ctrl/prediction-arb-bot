@@ -101,6 +101,9 @@ const ASSET_SERIES: Record<string, CryptoAsset> = {
   KXBTC: 'BTC', KXBTCD: 'BTC',
   KXETH: 'ETH', KXETHD: 'ETH',
   KXSOL: 'SOL', KXSOLD: 'SOL',
+  KXDOGE: 'DOGE',
+  KXXRP: 'XRP',
+  KXENA: 'ENA',
 };
 
 /** Parse Kalshi crypto fields — metadata-first, ticker-fallback. */
@@ -643,7 +646,7 @@ export async function fetchKalshiCryptoMarkets(limitPerSeries = 200): Promise<No
   if (getExchangeMode() === 'mock') return getMockMarkets('KALSHI');
 
   // Threshold series (KXBTCD etc.) are structurally better for cross-venue matching
-  const cryptoSeries = ['KXBTC', 'KXBTCD', 'KXETH', 'KXETHD', 'KXSOL', 'KXSOLD'];
+  const cryptoSeries = ['KXBTC', 'KXBTCD', 'KXETH', 'KXETHD', 'KXSOL', 'KXSOLD', 'KXDOGE', 'KXXRP', 'KXENA'];
   const results: NormalizedMarket[] = [];
 
   for (const s of cryptoSeries) {

@@ -37,14 +37,22 @@ export default function MappingsPage() {
   }
 
   async function handleToggle(id: string) {
-    await toggleMapping(id);
-    await load();
+    try {
+      await toggleMapping(id);
+      await load();
+    } catch (err: any) {
+      setError(err.message || 'Failed to toggle mapping');
+    }
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Delete this mapping?')) return;
-    await deleteMapping(id);
-    await load();
+    try {
+      await deleteMapping(id);
+      await load();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete mapping');
+    }
   }
 
   return (

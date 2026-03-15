@@ -6,6 +6,10 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "npx tsx --test src/arb-math.test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
   }
 }

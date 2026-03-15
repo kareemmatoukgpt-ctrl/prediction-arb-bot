@@ -78,10 +78,10 @@ export default function OpportunitiesPage() {
             Paper Trade Result: <span className={`badge ${result.status === 'SIMULATED' ? 'badge-green' : 'badge-red'}`}>{result.status}</span>
           </h3>
           <p style={{ fontSize: '0.85rem' }}>
-            PnL: <span className={result.result.pnl >= 0 ? 'profit' : 'loss'}>${result.result.pnl.toFixed(4)}</span>
-            {' | '}Yes: ${result.result.avgPriceYes.toFixed(4)}
-            {' | '}No: ${result.result.avgPriceNo.toFixed(4)}
-            {result.result.failureReason && <> | Reason: {result.result.failureReason}</>}
+            PnL: <span className={result.result?.pnl >= 0 ? 'profit' : 'loss'}>${result.result?.pnl?.toFixed(4) ?? '0'}</span>
+            {result.result?.avgPriceYes != null && <>{' | '}Yes: ${result.result.avgPriceYes.toFixed(4)}</>}
+            {result.result?.avgPriceNo != null && <>{' | '}No: ${result.result.avgPriceNo.toFixed(4)}</>}
+            {result.result?.failureReason && <> | Reason: {result.result.failureReason}</>}
           </p>
         </div>
       )}

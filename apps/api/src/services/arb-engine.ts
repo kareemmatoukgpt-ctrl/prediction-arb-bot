@@ -13,18 +13,18 @@ function computeLiquidityScore(pmSnapshot: any, kalshiSnapshot: any): number {
     const pmDepth: { price: number; size: number }[] = pmSnapshot.depth_json
       ? JSON.parse(pmSnapshot.depth_json) : [];
     for (const level of pmDepth) {
-      totalDepth += level.size || 0;
+      totalDepth += (level.price || 0) * (level.size || 0);
     }
   } catch { /* ignore parse errors */ }
 
   // Kalshi doesn't expose depth levels — small baseline if valid prices exist
   if (kalshiSnapshot.best_yes_ask != null && kalshiSnapshot.best_no_ask != null
       && kalshiSnapshot.best_yes_ask > 0.01 && kalshiSnapshot.best_no_ask > 0.01) {
-    totalDepth += 20;
+    totalDepth += 10;
   }
 
-  // Scale: 0 depth = 0, 500+ depth = 100
-  return Math.min(100, Math.round(totalDepth / 5));
+  // Scale: 0 depth = 0, 200+ dollar depth = 100
+  return Math.min(100, Math.round(totalDepth / 2));
 }
 
 function getCostParams(): CostModelParams {
@@ -187,7 +187,7 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
 
       // Determine suspect status
       const suspectReasons: string[] = [];
-      if (arb.totalCost < 0.20) suspectReasons.push('totalCost < $0.20 (likely invalid pairing)');
+      if (arb.totalCost < 0.20) suspectReasons.push('totalCost < 0.20 per unit (likely invalid pairing)');
       if (arb.expectedProfitBps > 5000) suspectReasons.push(`profitBps=${arb.expectedProfitBps} (absurdly high)`);
       if (pmOb.yesAsk == null || pmOb.noAsk == null) suspectReasons.push('PM has null ask');
       if (kalshiOb.yesAsk == null || kalshiOb.noAsk == null) suspectReasons.push('Kalshi has null ask');
@@ -275,9 +275,9 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
     }
   }
 
-  // Also clean stale feed entries
+  // Also clean stale feed entries — only cross-venue (conditional arbs are managed separately)
   const allFeedEntries = db.prepare(
-    'SELECT id, mapping_id, direction FROM opportunity_feed'
+    "SELECT id, mapping_id, direction FROM opportunity_feed WHERE arb_type = 'cross_venue' OR arb_type IS NULL"
   ).all() as any[];
   const deleteStaleFeed = db.prepare('DELETE FROM opportunity_feed WHERE id = ?');
   for (const row of allFeedEntries) {

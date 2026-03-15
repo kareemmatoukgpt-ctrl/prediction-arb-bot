@@ -89,13 +89,21 @@ function SuggestionCard({ s, tab, onApprove, onReject, actionMsg }: {
             {actionMsg!.msg}
           </span>
         )}
-        <button className="btn btn-sm btn-danger" onClick={() => onReject(s.id)}>Reject</button>
-        {tab === 'arb_eligible' ? (
-          <button className="btn btn-sm btn-primary" onClick={() => onApprove(s.id)}>Approve</button>
+        {s.status === 'approved' ? (
+          <span className="badge badge-green" style={{ marginRight: 'auto' }}>Approved</span>
+        ) : s.status === 'rejected' ? (
+          <span className="badge badge-red" style={{ marginRight: 'auto' }}>Rejected</span>
         ) : (
-          <button className="btn btn-sm" disabled title="Research-only \u2014 expiry or threshold mismatch too large" style={{ opacity: 0.4, cursor: 'not-allowed' }}>
-            Approve
-          </button>
+          <>
+            <button className="btn btn-sm btn-danger" onClick={() => onReject(s.id)}>Reject</button>
+            {tab === 'arb_eligible' ? (
+              <button className="btn btn-sm btn-primary" onClick={() => onApprove(s.id)}>Approve</button>
+            ) : (
+              <button className="btn btn-sm" disabled title="Research-only \u2014 expiry or threshold mismatch too large" style={{ opacity: 0.4, cursor: 'not-allowed' }}>
+                Approve
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -107,6 +115,7 @@ export default function SuggestionsPage() {
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [discoverySuggestions, setDiscoverySuggestions] = useState<any[]>([]);
   const [asset, setAsset] = useState('');
+  const [showApproved, setShowApproved] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genMsg, setGenMsg] = useState('');
   const [actionMsg, setActionMsg] = useState<{ id: string; msg: string; ok: boolean } | null>(null);
@@ -114,12 +123,12 @@ export default function SuggestionsPage() {
 
   async function load() {
     try {
+      const status = showApproved ? undefined : 'suggested';
       if (tab === 'discovery') {
-        // Discovery: top research pairs by score — shows closest-but-not-arb-eligible
         const data = await getSuggestions({ bucket: 'research', status: 'suggested', asset: asset || undefined, minScore: 40, limit: 20 });
         setDiscoverySuggestions(Array.isArray(data) ? data : []);
       } else {
-        const data = await getSuggestions({ bucket: tab, status: 'suggested', asset: asset || undefined, limit: 100 });
+        const data = await getSuggestions({ bucket: tab, status, asset: asset || undefined, limit: 100 });
         setSuggestions(Array.isArray(data) ? data : []);
       }
     } catch {
@@ -134,7 +143,7 @@ export default function SuggestionsPage() {
     setLoading(true);
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, asset]);
+  }, [tab, asset, showApproved]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -192,7 +201,14 @@ export default function SuggestionsPage() {
             <option value="SOL">SOL</option>
             <option value="XRP">XRP</option>
             <option value="DOGE">DOGE</option>
+            <option value="FED_RATE">FED Rate</option>
+            <option value="GDP">GDP</option>
+            <option value="CPI">CPI</option>
           </select>
+          <label style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: '0.72rem', textTransform: 'none' }}>
+            <input type="checkbox" checked={showApproved} onChange={e => setShowApproved(e.target.checked)} />
+            Show approved
+          </label>
           <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
             {generating ? 'Generating\u2026' : 'Generate Suggestions'}
           </button>

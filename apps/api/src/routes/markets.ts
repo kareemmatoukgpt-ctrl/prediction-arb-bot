@@ -30,6 +30,12 @@ router.get('/', (req: any, res: any) => {
     params.push(asset.toUpperCase());
   }
 
+  const category = req.query.category as string | undefined;
+  if (category) {
+    query += ' AND category = ?';
+    params.push(category.toUpperCase());
+  }
+
   query += ' ORDER BY updated_at DESC LIMIT ?';
   params.push(limit);
 

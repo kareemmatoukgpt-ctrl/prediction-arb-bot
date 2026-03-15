@@ -80,7 +80,7 @@ export const getSuggestions = (params: {
   const qs = new URLSearchParams();
   if (params.asset) qs.set('asset', params.asset);
   if (params.minScore != null) qs.set('minScore', String(params.minScore));
-  if (params.status) qs.set('status', params.status);
+  if (params.status !== undefined) qs.set('status', params.status);
   if (params.bucket) qs.set('bucket', params.bucket);
   if (params.limit != null) qs.set('limit', String(params.limit));
   return fetchApi(`/api/suggestions?${qs}`);

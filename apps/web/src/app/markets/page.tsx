@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { ingestCrypto } from '@/lib/api';
+import { ingestCrypto, ingestFed, ingestMacro } from '@/lib/api';
 
 function formatExpiry(expiryTs: number | null): string {
   if (!expiryTs) return '—';
@@ -17,6 +17,7 @@ export default function MarketsPage() {
   const [markets, setMarkets] = useState<any[]>([]);
   const [venue, setVenue] = useState('');
   const [asset, setAsset] = useState('');
+  const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [ingesting, setIngesting] = useState(false);
   const [ingestMsg, setIngestMsg] = useState('');
@@ -27,6 +28,7 @@ export default function MarketsPage() {
       const params: Record<string, string> = { limit: '200' };
       if (venue) params.venue = venue;
       if (asset) params.asset = asset;
+      if (category) params.category = category;
       if (search) params.search = search;
       const qs = new URLSearchParams(params);
       const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -44,7 +46,7 @@ export default function MarketsPage() {
     const iv = setInterval(load, 30000);
     return () => clearInterval(iv);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [venue, asset, search]);
+  }, [venue, asset, category, search]);
 
   async function handleIngest() {
     setIngesting(true);
@@ -68,9 +70,17 @@ export default function MarketsPage() {
     <>
       <div className="page-header">
         <h1>Markets Explorer</h1>
-        <button className="btn btn-primary" onClick={handleIngest} disabled={ingesting}>
-          {ingesting ? 'Ingesting…' : 'Ingest Crypto'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-sm" onClick={handleIngest} disabled={ingesting}>
+            {ingesting ? 'Ingesting…' : 'Ingest Crypto'}
+          </button>
+          <button className="btn btn-sm" onClick={async () => { setIngesting(true); try { const r = await ingestFed(); setIngestMsg(`Ingested ${r.kalshi} FED markets`); } catch (e: any) { setIngestMsg(e.message); } setIngesting(false); }} disabled={ingesting}>
+            Ingest FED
+          </button>
+          <button className="btn btn-sm" onClick={async () => { setIngesting(true); try { const r = await ingestMacro(); setIngestMsg(`Ingested ${r.kalshi} MACRO markets`); } catch (e: any) { setIngestMsg(e.message); } setIngesting(false); }} disabled={ingesting}>
+            Ingest MACRO
+          </button>
+        </div>
       </div>
 
       {ingestMsg && (
@@ -93,12 +103,25 @@ export default function MarketsPage() {
           </select>
         </div>
         <div className="form-group" style={{ margin: 0 }}>
+          <label>Category</label>
+          <select value={category} onChange={e => setCategory(e.target.value)}>
+            <option value="">All</option>
+            <option value="CRYPTO">Crypto</option>
+            <option value="FED">FED</option>
+            <option value="MACRO">MACRO</option>
+            <option value="EVENT">Event</option>
+          </select>
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
           <label>Asset</label>
           <select value={asset} onChange={e => setAsset(e.target.value)}>
             <option value="">All</option>
             <option value="BTC">BTC</option>
             <option value="ETH">ETH</option>
             <option value="SOL">SOL</option>
+            <option value="FED_RATE">FED Rate</option>
+            <option value="GDP">GDP</option>
+            <option value="CPI">CPI</option>
           </select>
         </div>
         <div className="form-group" style={{ margin: 0, flex: 1, minWidth: '200px' }}>

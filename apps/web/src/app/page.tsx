@@ -70,7 +70,7 @@ export default function FeedPage() {
 
   useEffect(() => {
     load();
-    const iv = setInterval(load, 3000);
+    const iv = setInterval(load, 10000);
     return () => clearInterval(iv);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, minEdge, sort, showSuspect]);

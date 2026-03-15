@@ -2,13 +2,14 @@ import express = require('express');
 import { v4 as uuid } from 'uuid';
 import { getDb } from '../db/schema';
 import { generateSuggestions } from '../services/crypto-matcher';
+import { generateEventSuggestions } from '../services/event-matcher';
 
 const router = express.Router();
 
 // List suggestions
 router.get('/', (req: any, res: any) => {
   const db = getDb();
-  const { asset, minScore = '0', status = 'suggested', bucket, limit = '100' } = req.query;
+  const { asset, minScore = '0', status, bucket, limit = '100' } = req.query;
 
   let query = `
     SELECT ms.*,
@@ -21,8 +22,12 @@ router.get('/', (req: any, res: any) => {
     FROM mapping_suggestions ms
     LEFT JOIN canonical_markets pm ON pm.venue_market_id = ms.polymarket_market_id AND pm.venue = 'POLYMARKET'
     LEFT JOIN canonical_markets k  ON k.venue_market_id  = ms.kalshi_market_id    AND k.venue  = 'KALSHI'
-    WHERE ms.status = ?`;
-  const params: any[] = [status];
+    WHERE 1=1`;
+  const params: any[] = [];
+  if (status) {
+    query += ' AND ms.status = ?';
+    params.push(status);
+  }
 
   if (asset) {
     query += ' AND pm.asset = ?';
@@ -49,11 +54,18 @@ router.get('/:id', (req: any, res: any) => {
   res.json(row);
 });
 
-// Generate suggestions
+// Generate suggestions (crypto + event)
 router.post('/generate', (_req: any, res: any) => {
   try {
-    const result = generateSuggestions(40);
-    res.json({ success: true, ...result });
+    const crypto = generateSuggestions(40);
+    const events = generateEventSuggestions(35);
+    res.json({
+      success: true,
+      arb_eligible: (crypto.arb_eligible ?? 0) + (events.arb_eligible ?? 0),
+      research: (crypto.research ?? 0) + (events.research ?? 0),
+      crypto_arb_eligible: crypto.arb_eligible ?? 0,
+      event_arb_eligible: events.arb_eligible ?? 0,
+    });
   } catch (err: any) {
     console.error('[suggestions] generate error:', err);
     res.status(500).json({ error: err.message || 'Failed to generate suggestions' });

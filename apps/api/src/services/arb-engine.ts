@@ -195,8 +195,8 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
       // SQLite datetime('now') is UTC but lacks 'Z' suffix — append it for correct JS parsing
       const pmAge = pmSnapshot.ts ? (now.getTime() - new Date(pmSnapshot.ts + 'Z').getTime()) / 1000 : Infinity;
       const kAge = kalshiSnapshot.ts ? (now.getTime() - new Date(kalshiSnapshot.ts + 'Z').getTime()) / 1000 : Infinity;
-      if (pmAge > 30) suspectReasons.push(`PM orderbook stale (${Math.round(pmAge)}s old)`);
-      if (kAge > 30) suspectReasons.push(`Kalshi orderbook stale (${Math.round(kAge)}s old)`);
+      if (pmAge > 120) suspectReasons.push(`PM orderbook stale (${Math.round(pmAge)}s old)`);
+      if (kAge > 120) suspectReasons.push(`Kalshi orderbook stale (${Math.round(kAge)}s old)`);
 
       const isSuspect = suspectReasons.length > 0 ? 1 : 0;
 

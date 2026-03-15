@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { getSuggestions, generateSuggestions, approveSuggestion, rejectSuggestion } from '@/lib/api';
+import { getSuggestions, generateSuggestions, runSmartMatch, approveSuggestion, rejectSuggestion } from '@/lib/api';
 
 function ScoreBadge({ score }: { score: number }) {
   const cls = score >= 90 ? 'badge-green' : score >= 70 ? 'badge-yellow' : 'badge-red';
@@ -209,8 +209,19 @@ export default function SuggestionsPage() {
             <input type="checkbox" checked={showApproved} onChange={e => setShowApproved(e.target.checked)} />
             Show approved
           </label>
-          <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
-            {generating ? 'Generating\u2026' : 'Generate Suggestions'}
+          <button className="btn" onClick={handleGenerate} disabled={generating}>
+            {generating ? 'Generating\u2026' : 'Generate'}
+          </button>
+          <button className="btn btn-primary" onClick={async () => {
+            setGenerating(true); setGenMsg('');
+            try {
+              const result = await runSmartMatch();
+              setGenMsg(`Smart match: ${result.arb_eligible ?? 0} arb-eligible, ${result.research ?? 0} research (${result.processed} pairs checked)`);
+              await load();
+            } catch (err: any) { setGenMsg(`Error: ${err.message}`); }
+            finally { setGenerating(false); }
+          }} disabled={generating}>
+            {generating ? 'Matching\u2026' : 'Smart Match (AI)'}
           </button>
         </div>
       </div>

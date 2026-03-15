@@ -13,6 +13,7 @@
     "diagnose": "tsx src/scripts/diagnose-pipeline.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@prediction-arb-bot/core": "*",
     "better-sqlite3": "^11.0.0",
     "cors": "^2.8.5",

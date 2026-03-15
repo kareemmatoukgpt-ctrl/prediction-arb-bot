@@ -89,6 +89,15 @@ export const getSuggestions = (params: {
 export const generateSuggestions = () =>
   fetchApi('/api/suggestions/generate', { method: 'POST' });
 
+export const runSmartMatch = () =>
+  fetchApi('/api/suggestions/smart-match', { method: 'POST' });
+
+export const compareSuggestion = (pmQuestion: string, kalshiQuestion: string) =>
+  fetchApi('/api/suggestions/compare', {
+    method: 'POST',
+    body: JSON.stringify({ pmQuestion, kalshiQuestion }),
+  });
+
 export const approveSuggestion = (id: string) =>
   fetchApi(`/api/suggestions/${id}/approve`, { method: 'POST' });
 

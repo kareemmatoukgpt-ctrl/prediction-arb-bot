@@ -3,6 +3,8 @@ import { v4 as uuid } from 'uuid';
 import { getDb } from '../db/schema';
 import { generateSuggestions } from '../services/crypto-matcher';
 import { generateEventSuggestions } from '../services/event-matcher';
+import { runSmartMatcher } from '../services/smart-matcher';
+import { extractMarketEntity, compareEntities } from '../services/llm-extractor';
 
 const router = express.Router();
 
@@ -69,6 +71,35 @@ router.post('/generate', (_req: any, res: any) => {
   } catch (err: any) {
     console.error('[suggestions] generate error:', err);
     res.status(500).json({ error: err.message || 'Failed to generate suggestions' });
+  }
+});
+
+// Smart match using LLM entity extraction
+router.post('/smart-match', async (_req: any, res: any) => {
+  try {
+    const result = await runSmartMatcher({ maxMarkets: 300 });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[suggestions] smart-match error:', err);
+    res.status(500).json({ error: err.message || 'Smart match failed' });
+  }
+});
+
+// Compare two market questions using LLM extraction
+router.post('/compare', async (req: any, res: any) => {
+  const { pmQuestion, kalshiQuestion } = req.body;
+  if (!pmQuestion || !kalshiQuestion) {
+    return res.status(400).json({ error: 'pmQuestion and kalshiQuestion required' });
+  }
+  try {
+    const [pmEntity, kalshiEntity] = await Promise.all([
+      extractMarketEntity(pmQuestion, 'POLYMARKET'),
+      extractMarketEntity(kalshiQuestion, 'KALSHI'),
+    ]);
+    const comparison = compareEntities(pmEntity, kalshiEntity);
+    res.json({ pmEntity, kalshiEntity, comparison });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

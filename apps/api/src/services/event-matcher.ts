@@ -186,19 +186,45 @@ export function generateEventSuggestions(minScore = 50): {
   let total = 0;
   let arb_eligible = 0;
   let research = 0;
+  let pairsChecked = 0;
 
-  // For efficiency: pre-tokenize all Kalshi markets
+  // Build inverted index: token → set of Kalshi market indices
+  // This avoids O(PM * K) full comparisons by only scoring pairs that share tokens
   const kalshiTokenized = kalshiMarkets.map(k => ({
     market: k,
     tokens: tokenize(k.question),
     entities: extractEntities(k.question),
   }));
 
+  const invertedIndex = new Map<string, number[]>();
+  for (let i = 0; i < kalshiTokenized.length; i++) {
+    for (const token of kalshiTokenized[i].tokens) {
+      let list = invertedIndex.get(token);
+      if (!list) { list = []; invertedIndex.set(token, list); }
+      list.push(i);
+    }
+  }
+
   for (const pm of pmMarkets) {
     const pmTokens = tokenize(pm.question);
 
-    // Quick pre-filter: find Kalshi markets with at least 1 overlapping token
-    for (const { market: kalshi } of kalshiTokenized) {
+    // Find candidate Kalshi markets: those sharing at least 2 tokens with this PM market
+    const candidateCounts = new Map<number, number>();
+    for (const token of pmTokens) {
+      const indices = invertedIndex.get(token);
+      if (!indices) continue;
+      for (const idx of indices) {
+        candidateCounts.set(idx, (candidateCounts.get(idx) || 0) + 1);
+      }
+    }
+
+    // Only score pairs with >= 2 shared tokens (minimum for meaningful similarity)
+    for (const [kIdx, sharedCount] of candidateCounts) {
+      if (sharedCount < 2) continue;
+
+      const kalshi = kalshiTokenized[kIdx].market;
+      pairsChecked++;
+
       const result = scoreEventPair(pm, kalshi);
       if (result.score < minScore) continue;
 
@@ -223,6 +249,6 @@ export function generateEventSuggestions(minScore = 50): {
     }
   }
 
-  console.log(`[event-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research}) from ${pmMarkets.length} PM x ${kalshiMarkets.length} Kalshi event markets`);
+  console.log(`[event-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research}) — checked ${pairsChecked} candidate pairs from ${pmMarkets.length} PM x ${kalshiMarkets.length} Kalshi event markets`);
   return { created: total, arb_eligible, research };
 }

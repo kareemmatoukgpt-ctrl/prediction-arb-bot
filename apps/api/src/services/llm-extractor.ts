@@ -67,6 +67,7 @@ function getClient(): Anthropic | null {
   if (client) return client;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
+  console.log('[llm-extractor] Anthropic client initialized');
   client = new Anthropic({ apiKey });
   return client;
 }
@@ -102,7 +103,9 @@ export async function extractMarketEntity(
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    let text = response.content[0].type === 'text' ? response.content[0].text : '';
+    // Strip markdown code fencing if present
+    text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
     const entity = JSON.parse(text) as MarketEntity;
 
     // Cache it

@@ -36,29 +36,34 @@ export async function runSmartMatcher(options: {
   errors: number;
 }> {
   const db = getDb();
-  const maxMarkets = options.maxMarkets ?? 500;
+  const maxPerAsset = options.maxMarkets ?? 200;
   const minConfidence = options.minConfidence ?? 0.6;
   const start = Date.now();
 
-  // Get markets that could benefit from smart matching
-  // Focus on structured markets (FED, MACRO, crypto) where we have asset tags
+  // Only match on structured assets that exist on BOTH venues
+  const MATCHABLE_ASSETS = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ENA', 'FED_RATE', 'CPI', 'GDP'];
+
   const pmMarkets = db.prepare(`
     SELECT venue_market_id, question, asset, category, predicate_type,
            predicate_threshold, predicate_direction, expiry_ts
     FROM canonical_markets
-    WHERE venue = 'POLYMARKET' AND status = 'open' AND asset IS NOT NULL
-    ORDER BY updated_at DESC
+    WHERE venue = 'POLYMARKET' AND status = 'open'
+      AND asset IN (${MATCHABLE_ASSETS.map(() => '?').join(',')})
+    ORDER BY asset, updated_at DESC
     LIMIT ?
-  `).all(maxMarkets) as any[];
+  `).all(...MATCHABLE_ASSETS, maxPerAsset * MATCHABLE_ASSETS.length) as any[];
 
   const kalshiMarkets = db.prepare(`
     SELECT venue_market_id, question, asset, category, predicate_type,
            predicate_threshold, predicate_direction, expiry_ts
     FROM canonical_markets
-    WHERE venue = 'KALSHI' AND status = 'open' AND asset IS NOT NULL
-    ORDER BY updated_at DESC
+    WHERE venue = 'KALSHI' AND status = 'open'
+      AND asset IN (${MATCHABLE_ASSETS.map(() => '?').join(',')})
+    ORDER BY asset, updated_at DESC
     LIMIT ?
-  `).all(maxMarkets) as any[];
+  `).all(...MATCHABLE_ASSETS, maxPerAsset * MATCHABLE_ASSETS.length) as any[];
+
+  console.log(`[smart-matcher] Loaded ${pmMarkets.length} PM + ${kalshiMarkets.length} K markets across ${MATCHABLE_ASSETS.length} assets`);
 
   // Group Kalshi by asset for efficient lookup
   const kalshiByAsset = new Map<string, typeof kalshiMarkets>();

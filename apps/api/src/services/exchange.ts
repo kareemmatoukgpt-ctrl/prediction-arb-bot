@@ -415,7 +415,7 @@ export async function fetchPolymarketMarkets(
         return {
           venueMarketId: m.conditionId || m.id || m.marketId,
           question,
-          url: `https://polymarket.com/event/${m.slug || m.conditionId}`,
+          url: `https://polymarket.com/event/${m.events?.[0]?.slug || m.slug || m.conditionId}`,
           status: m.active ? 'open' : 'closed',
           yesTokenId: tokenIds[0],
           noTokenId: tokenIds[1],
@@ -610,7 +610,7 @@ export async function fetchPolymarketCryptoMarkets(): Promise<NormalizedMarket[]
         results.push({
           venueMarketId: conditionId,
           question,
-          url: `https://polymarket.com/event/${m.slug || conditionId}`,
+          url: `https://polymarket.com/event/${m.events?.[0]?.slug || m.slug || conditionId}`,
           status: m.active ? 'open' : 'closed',
           yesTokenId: tokenIds[0],
           noTokenId: tokenIds[1],
@@ -813,7 +813,7 @@ export async function fetchPolymarketCategorizedMarkets(): Promise<CategorizedPM
         const market: NormalizedMarket = {
           venueMarketId: conditionId,
           question,
-          url: `https://polymarket.com/event/${m.slug || conditionId}`,
+          url: `https://polymarket.com/event/${m.events?.[0]?.slug || m.slug || conditionId}`,
           status: m.active ? 'open' : 'closed',
           yesTokenId: tokenIds[0],
           noTokenId: tokenIds[1],

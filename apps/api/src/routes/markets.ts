@@ -1,6 +1,6 @@
 import express = require('express');
 import { getDb } from '../db/schema';
-import { refreshMarkets, refreshCryptoMarkets } from '../services/ingestion';
+import { refreshMarkets, refreshCryptoMarkets, refreshFedMarkets, refreshMacroMarkets } from '../services/ingestion';
 
 const router = express.Router();
 
@@ -69,6 +69,28 @@ router.post('/ingest/crypto', async (_req: any, res: any) => {
   } catch (err) {
     console.error('[markets] ingest/crypto error:', err);
     res.status(500).json({ error: 'Failed to ingest crypto markets' });
+  }
+});
+
+// Ingest FED markets from Kalshi
+router.post('/ingest/fed', async (_req: any, res: any) => {
+  try {
+    const result = await refreshFedMarkets();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[markets] ingest/fed error:', err);
+    res.status(500).json({ error: 'Failed to ingest FED markets' });
+  }
+});
+
+// Ingest MACRO markets (CPI, GDP) from Kalshi
+router.post('/ingest/macro', async (_req: any, res: any) => {
+  try {
+    const result = await refreshMacroMarkets();
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[markets] ingest/macro error:', err);
+    res.status(500).json({ error: 'Failed to ingest MACRO markets' });
   }
 });
 

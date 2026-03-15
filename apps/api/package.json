@@ -11,7 +11,8 @@
     "verify:live": "tsx src/scripts/verify-live.ts",
     "verify:crypto-mapping": "tsx src/scripts/verify-crypto-mapping.ts",
     "verify:arb-eligible": "tsx src/scripts/verify-arb-eligible.ts",
-    "test:parsing": "tsx src/scripts/test-parsing.ts"
+    "test:parsing": "tsx src/scripts/test-parsing.ts",
+    "diagnose": "tsx src/scripts/diagnose-pipeline.ts"
   },
   "dependencies": {
     "@prediction-arb-bot/core": "*",
@@ -19,7 +20,6 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "pmxtjs": "^2.19.6",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

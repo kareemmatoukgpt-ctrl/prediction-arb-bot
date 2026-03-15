@@ -70,6 +70,7 @@ export interface NormalizedMarket {
   noTokenId?: string;
   resolvesAt?: string;
   cryptoFields?: CryptoFieldsLocal;
+  eventGroup?: string;
 }
 
 export interface NormalizedOrderbook {
@@ -81,15 +82,18 @@ export interface NormalizedOrderbook {
   raw: any;
 }
 
-export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP' | 'DOGE' | 'ENA';
+export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP' | 'DOGE' | 'ENA' | 'FED_RATE' | 'CPI' | 'GDP';
 
 export interface CryptoFieldsLocal {
-  asset: CryptoAsset;
+  asset: CryptoAsset | string;
   expiryTs: number | null;
   predicateDirection: 'ABOVE' | 'BELOW' | null;
   predicateThreshold: number | null;
-  predicateType: 'CLOSE_AT' | 'TOUCH_BY';
+  predicateType: 'CLOSE_AT' | 'TOUCH_BY' | 'BINARY_EVENT';
 }
+
+// Series prefixes for structured markets (crypto, FED, MACRO) — everything else is an event
+const STRUCTURED_SERIES_PREFIXES = ['KXBTC', 'KXBTCD', 'KXETH', 'KXETHD', 'KXSOL', 'KXSOLD', 'KXDOGE', 'KXENA', 'KXXRP', 'KXFED', 'KXCPI', 'KXGDP'];
 
 // ── Crypto field parsing ─────────────────────────────────────────────────────
 
@@ -125,6 +129,27 @@ function parseKalshiCryptoFields(m: any): CryptoFieldsLocal | null {
   const predicateType: 'CLOSE_AT' | 'TOUCH_BY' = /touch|at any point|at any time|ever reach/.test(allText) ? 'TOUCH_BY' : 'CLOSE_AT';
 
   return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
+}
+
+/** Parse Kalshi FED fields — KXFED series for federal funds rate markets. */
+function parseKalshiFedFields(m: any): CryptoFieldsLocal | null {
+  const seriesPrefix = (m.event_ticker || m.ticker || '').split('-')[0];
+  if (seriesPrefix !== 'KXFED') return null;
+
+  const predicateThreshold: number | null = m.floor_strike != null ? Number(m.floor_strike) : null;
+
+  const expiryTs: number | null = m.close_time
+    ? Math.floor(new Date(m.close_time).getTime() / 1000)
+    : m.expiration_time
+    ? Math.floor(new Date(m.expiration_time).getTime() / 1000)
+    : null;
+
+  // FED markets are always "above X%" — the question is whether rate exceeds threshold
+  const predicateDirection: 'ABOVE' = 'ABOVE';
+  // FED rate decisions are point-in-time (after the meeting) = CLOSE_AT
+  const predicateType: 'CLOSE_AT' = 'CLOSE_AT';
+
+  return { asset: 'FED_RATE', expiryTs, predicateDirection, predicateThreshold, predicateType };
 }
 
 // Asset regex patterns for Polymarket question parsing
@@ -177,6 +202,132 @@ export function parsePolymarketCryptoFields(question: string, endDate?: string):
   }
 
   const expiryTs: number | null = endDate ? Math.floor(new Date(endDate).getTime() / 1000) : null;
+
+  return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
+}
+
+// ── FED field parsing (Polymarket) ──────────────────────────────────────────
+
+const PM_FED_PATTERNS: RegExp[] = [
+  /federal\s+funds?\s+rate/i,
+  /fed\s+funds?\s+rate/i,
+  /\bfomc\b/i,
+  /\bfed\b.*\b(cut|hike|raise|lower|hold|pause|rate)\b/i,
+  /\b(fed|federal\s+reserve)\b.*\binterest\s+rate/i,
+  /\binterest\s+rate\b.*\b(fed|fomc|federal\s+reserve)\b/i,
+];
+
+/** Parse Polymarket FED fields from question text. Exported for testing. */
+export function parsePolymarketFedFields(question: string, endDate?: string): CryptoFieldsLocal | null {
+  let isFed = false;
+  for (const pattern of PM_FED_PATTERNS) {
+    if (pattern.test(question)) { isFed = true; break; }
+  }
+  if (!isFed) return null;
+
+  // Direction: "above X%" = ABOVE, "cut/lower/reduce" = BELOW (rate goes down), "hike/raise" = ABOVE
+  let predicateDirection: 'ABOVE' | 'BELOW' | null = null;
+  if (/above|higher|at\s+least|exceed|hike|raise|increase/i.test(question)) {
+    predicateDirection = 'ABOVE';
+  } else if (/below|lower|at\s+most|cut|decrease|reduce/i.test(question)) {
+    predicateDirection = 'BELOW';
+  }
+
+  // Threshold: "above 4.25%" or "425 basis points"
+  let predicateThreshold: number | null = null;
+  const pctMatch = question.match(/(\d+\.?\d*)\s*%/);
+  if (pctMatch) {
+    const val = parseFloat(pctMatch[1]);
+    if (val >= 0 && val <= 20) predicateThreshold = val;
+  }
+  if (!predicateThreshold) {
+    const bpsMatch = question.match(/(\d+)\s*(?:basis\s+points|bps)/i);
+    if (bpsMatch) {
+      predicateThreshold = parseInt(bpsMatch[1]) / 100;
+    }
+  }
+
+  const expiryTs: number | null = endDate ? Math.floor(new Date(endDate).getTime() / 1000) : null;
+  const predicateType: 'CLOSE_AT' = 'CLOSE_AT'; // FED decisions are point-in-time
+
+  return { asset: 'FED_RATE', expiryTs, predicateDirection, predicateThreshold, predicateType };
+}
+
+// ── MACRO field parsing ─────────────────────────────────────────────────────
+
+const MACRO_SERIES: Record<string, CryptoAsset> = {
+  KXCPI: 'CPI',
+  KXGDP: 'GDP',
+};
+
+/** Parse Kalshi MACRO fields — KXCPI (CPI monthly change) and KXGDP (GDP growth). */
+function parseKalshiMacroFields(m: any): CryptoFieldsLocal | null {
+  const seriesPrefix = (m.event_ticker || m.ticker || '').split('-')[0];
+  const asset = MACRO_SERIES[seriesPrefix];
+  if (!asset) return null;
+
+  const predicateThreshold: number | null = m.floor_strike != null ? Number(m.floor_strike) : null;
+
+  const expiryTs: number | null = m.close_time
+    ? Math.floor(new Date(m.close_time).getTime() / 1000)
+    : m.expiration_time
+    ? Math.floor(new Date(m.expiration_time).getTime() / 1000)
+    : null;
+
+  // Macro markets are "more than X%" = ABOVE
+  const predicateDirection: 'ABOVE' = 'ABOVE';
+  // Data releases are point-in-time = CLOSE_AT
+  const predicateType: 'CLOSE_AT' = 'CLOSE_AT';
+
+  return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
+}
+
+const PM_MACRO_CPI_PATTERNS: RegExp[] = [
+  /\bcpi\b/i,
+  /consumer\s+price\s+index/i,
+  /\binflation\s+rate\b/i,
+  /\binflation\b.*\bmonthly\b/i,
+  /\bmonthly\b.*\binflation\b/i,
+];
+
+const PM_MACRO_GDP_PATTERNS: RegExp[] = [
+  /\bgdp\b/i,
+  /gross\s+domestic\s+product/i,
+  /\beconomic\s+growth\b.*\bquarter/i,
+  /\breal\s+gdp\b/i,
+];
+
+/** Parse Polymarket MACRO fields (CPI or GDP) from question text. Exported for testing. */
+export function parsePolymarketMacroFields(question: string, endDate?: string): CryptoFieldsLocal | null {
+  let asset: CryptoAsset | null = null;
+  for (const pattern of PM_MACRO_CPI_PATTERNS) {
+    if (pattern.test(question)) { asset = 'CPI'; break; }
+  }
+  if (!asset) {
+    for (const pattern of PM_MACRO_GDP_PATTERNS) {
+      if (pattern.test(question)) { asset = 'GDP'; break; }
+    }
+  }
+  if (!asset) return null;
+
+  // Direction: "more than / above / exceed" = ABOVE, "less than / below" = BELOW
+  let predicateDirection: 'ABOVE' | 'BELOW' | null = null;
+  if (/above|more\s+than|exceed|higher|increase|rise/i.test(question)) {
+    predicateDirection = 'ABOVE';
+  } else if (/below|less\s+than|under|lower|decrease|fall|decline/i.test(question)) {
+    predicateDirection = 'BELOW';
+  }
+
+  // Threshold: "more than 0.3%" or "above 2.5%"
+  let predicateThreshold: number | null = null;
+  const pctMatch = question.match(/(\d+\.?\d*)\s*%/);
+  if (pctMatch) {
+    const val = parseFloat(pctMatch[1]);
+    if (val >= -5 && val <= 20) predicateThreshold = val;
+  }
+
+  const expiryTs: number | null = endDate ? Math.floor(new Date(endDate).getTime() / 1000) : null;
+  const predicateType: 'CLOSE_AT' = 'CLOSE_AT'; // data releases are point-in-time
 
   return { asset, expiryTs, predicateDirection, predicateThreshold, predicateType };
 }
@@ -507,6 +658,283 @@ export async function fetchKalshiCryptoMarkets(limitPerSeries = 200): Promise<No
     }
   }
 
+  return results;
+}
+
+// ── FED-specific fetch helpers ────────────────────────────────────────────
+
+/**
+ * Fetch Kalshi FED rate markets (KXFED series).
+ * Each FOMC meeting has ~18 strike levels (0.00% to 4.25%) for rate thresholds.
+ */
+export async function fetchKalshiFedMarkets(limit = 200): Promise<NormalizedMarket[]> {
+  if (getExchangeMode() === 'mock') return getMockMarkets('KALSHI');
+
+  const fedSeries = ['KXFED'];
+  const results: NormalizedMarket[] = [];
+
+  for (const s of fedSeries) {
+    try {
+      const params = new URLSearchParams({ status: 'open', limit: String(limit), series_ticker: s });
+      const data = await fetchJson(`${KALSHI_API_URL}/markets?${params}`);
+      const markets: any[] = data.markets || [];
+
+      for (const m of markets) {
+        const fedFields = parseKalshiFedFields(m);
+        if (!fedFields) continue;
+
+        results.push({
+          venueMarketId: m.ticker,
+          question: m.title || m.question || '',
+          url: `https://kalshi.com/markets/${m.ticker}`,
+          status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
+          yesTokenId: m.ticker,
+          noTokenId: m.ticker,
+          resolvesAt: m.close_time || m.expiration_time || undefined,
+          cryptoFields: fedFields,
+        });
+      }
+
+      if (results.length > 0) {
+        console.log(`[exchange] Kalshi ${s}: ${results.length} FED markets`);
+      }
+    } catch (err) {
+      console.warn(`[exchange] Kalshi FED fetch failed for series ${s}:`, err);
+    }
+  }
+
+  return results;
+}
+
+// ── MACRO-specific fetch helpers ──────────────────────────────────────────
+
+/**
+ * Fetch Kalshi MACRO markets (KXCPI + KXGDP series).
+ */
+export async function fetchKalshiMacroMarkets(limit = 200): Promise<NormalizedMarket[]> {
+  if (getExchangeMode() === 'mock') return getMockMarkets('KALSHI');
+
+  const macroSeries = Object.keys(MACRO_SERIES);
+  const results: NormalizedMarket[] = [];
+
+  for (const s of macroSeries) {
+    try {
+      const params = new URLSearchParams({ status: 'open', limit: String(limit), series_ticker: s });
+      const data = await fetchJson(`${KALSHI_API_URL}/markets?${params}`);
+      const markets: any[] = data.markets || [];
+
+      for (const m of markets) {
+        const macroFields = parseKalshiMacroFields(m);
+        if (!macroFields) continue;
+
+        results.push({
+          venueMarketId: m.ticker,
+          question: m.title || m.question || '',
+          url: `https://kalshi.com/markets/${m.ticker}`,
+          status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
+          yesTokenId: m.ticker,
+          noTokenId: m.ticker,
+          resolvesAt: m.close_time || m.expiration_time || undefined,
+          cryptoFields: macroFields,
+        });
+      }
+
+      if (markets.length > 0) {
+        console.log(`[exchange] Kalshi ${s}: ${markets.length} MACRO markets`);
+      }
+    } catch (err) {
+      console.warn(`[exchange] Kalshi MACRO fetch failed for series ${s}:`, err);
+    }
+  }
+
+  return results;
+}
+
+// ── Combined categorized fetch ────────────────────────────────────────────
+
+export interface CategorizedPMMarkets {
+  crypto: NormalizedMarket[];
+  fed: NormalizedMarket[];
+  macro: NormalizedMarket[];
+  events: NormalizedMarket[];
+}
+
+/**
+ * Single-pass Polymarket paginator that categorizes markets into crypto, FED, and MACRO.
+ * Avoids doubling the 30-60s full scan by applying all parsers in one pass.
+ */
+export async function fetchPolymarketCategorizedMarkets(): Promise<CategorizedPMMarkets> {
+  if (getExchangeMode() === 'mock') {
+    return { crypto: getMockMarkets('POLYMARKET'), fed: [], macro: [], events: [] };
+  }
+
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 120;
+  const seenIds = new Set<string>();
+  const crypto: NormalizedMarket[] = [];
+  const fed: NormalizedMarket[] = [];
+  const macro: NormalizedMarket[] = [];
+  const events: NormalizedMarket[] = [];
+  let totalScanned = 0;
+
+  console.log('[exchange] PM categorized scan: paginating all open markets...');
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    try {
+      const params = new URLSearchParams({
+        active: 'true',
+        closed: 'false',
+        limit: String(PAGE_SIZE),
+        offset: String(page * PAGE_SIZE),
+      });
+
+      const data = await fetchJson(`${PM_GAMMA_URL}/markets?${params}`, 30000);
+      const markets: any[] = Array.isArray(data) ? data : data.markets || [];
+
+      if (markets.length === 0) break;
+      totalScanned += markets.length;
+
+      for (const m of markets) {
+        let tokenIds: string[] = [];
+        try {
+          tokenIds = typeof m.clobTokenIds === 'string'
+            ? JSON.parse(m.clobTokenIds)
+            : (m.clobTokenIds || []);
+        } catch { continue; }
+        if (tokenIds.length < 2) continue;
+
+        const conditionId = m.conditionId || m.id;
+        if (seenIds.has(conditionId)) continue;
+
+        const question = m.question || m.title || '';
+        const parseContext = [question, m.slug || '', m.groupItemTitle || '', (m.description || '').slice(0, 500)].join(' ');
+        const endDate = m.endDateIso || m.endDate;
+
+        const market: NormalizedMarket = {
+          venueMarketId: conditionId,
+          question,
+          url: `https://polymarket.com/event/${m.slug || conditionId}`,
+          status: m.active ? 'open' : 'closed',
+          yesTokenId: tokenIds[0],
+          noTokenId: tokenIds[1],
+          resolvesAt: endDate || undefined,
+        };
+
+        // Try crypto first (most common)
+        const cryptoFields = parsePolymarketCryptoFields(parseContext, endDate);
+        if (cryptoFields) {
+          seenIds.add(conditionId);
+          crypto.push({ ...market, cryptoFields });
+          continue;
+        }
+
+        // Try FED
+        const fedFields = parsePolymarketFedFields(parseContext, endDate);
+        if (fedFields) {
+          seenIds.add(conditionId);
+          fed.push({ ...market, cryptoFields: fedFields });
+          continue;
+        }
+
+        // Try MACRO (CPI, GDP)
+        const macroFields = parsePolymarketMacroFields(parseContext, endDate);
+        if (macroFields) {
+          seenIds.add(conditionId);
+          macro.push({ ...market, cryptoFields: macroFields });
+          continue;
+        }
+
+        // Everything else is an event market (binary YES/NO on an outcome)
+        seenIds.add(conditionId);
+        const slug = m.slug || '';
+        // Use condition_id as the event group (PM groups related markets under same condition)
+        const eventGroup = m.conditionId || m.groupSlug || slug;
+        events.push({
+          ...market,
+          cryptoFields: {
+            asset: slug || conditionId,
+            expiryTs: endDate ? Math.floor(new Date(endDate).getTime() / 1000) : null,
+            predicateDirection: null,
+            predicateThreshold: null,
+            predicateType: 'BINARY_EVENT' as const,
+          },
+          eventGroup,
+        });
+      }
+
+      if (markets.length < PAGE_SIZE) break;
+      await new Promise(r => setTimeout(r, 100));
+    } catch (err) {
+      console.warn(`[exchange] PM categorized page ${page} failed:`, err);
+    }
+  }
+
+  console.log(`[exchange] PM categorized scan complete: ${crypto.length} crypto, ${fed.length} FED, ${macro.length} MACRO, ${events.length} events in ${totalScanned} total`);
+  return { crypto, fed, macro, events };
+}
+
+// ── Event market fetch helpers ──────────────────────────────────────────────
+
+/**
+ * Fetch Kalshi event markets — everything NOT in structured series (crypto/FED/MACRO).
+ * These are political, sports, cultural, and other binary outcome markets.
+ */
+export async function fetchKalshiEventMarkets(limit = 200): Promise<NormalizedMarket[]> {
+  if (getExchangeMode() === 'mock') return [];
+
+  const results: NormalizedMarket[] = [];
+  let cursor: string | undefined;
+
+  try {
+    // Paginate through all open Kalshi markets
+    for (let page = 0; page < 20; page++) {
+      const params = new URLSearchParams({ status: 'open', limit: String(limit) });
+      if (cursor) params.set('cursor', cursor);
+
+      const data = await fetchJson(`${KALSHI_API_URL}/markets?${params}`);
+      const markets: any[] = data.markets || [];
+      if (markets.length === 0) break;
+
+      for (const m of markets) {
+        const seriesPrefix = (m.event_ticker || m.ticker || '').split('-')[0];
+
+        // Skip structured series — these are handled by dedicated fetchers
+        if (STRUCTURED_SERIES_PREFIXES.some(p => seriesPrefix.startsWith(p))) continue;
+
+        const expiryTs = m.close_time
+          ? Math.floor(new Date(m.close_time).getTime() / 1000)
+          : m.expiration_time
+          ? Math.floor(new Date(m.expiration_time).getTime() / 1000)
+          : null;
+
+        results.push({
+          venueMarketId: m.ticker,
+          question: m.title || m.question || '',
+          url: `https://kalshi.com/markets/${m.ticker}`,
+          status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
+          yesTokenId: m.ticker,
+          noTokenId: m.ticker,
+          resolvesAt: m.close_time || m.expiration_time || undefined,
+          cryptoFields: {
+            asset: seriesPrefix || m.ticker,
+            expiryTs,
+            predicateDirection: null,
+            predicateThreshold: null,
+            predicateType: 'BINARY_EVENT' as const,
+          },
+          eventGroup: m.event_ticker || seriesPrefix,
+        });
+      }
+
+      cursor = data.cursor;
+      if (!cursor) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+  } catch (err) {
+    console.error('[exchange] Kalshi event markets fetch error:', err);
+  }
+
+  console.log(`[exchange] Kalshi event markets: ${results.length} found`);
   return results;
 }
 

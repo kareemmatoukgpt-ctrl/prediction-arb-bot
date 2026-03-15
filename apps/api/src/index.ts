@@ -5,7 +5,7 @@ import express = require('express');
 import cors = require('cors');
 import { getDb, closeDb } from './db/schema';
 import { startIngestion, stopIngestion } from './services/ingestion';
-import { startArbScanner, stopArbScanner } from './services/arb-engine';
+// Arb scanning is now chained after orderbook refresh in ingestion.ts
 import { testExchangeConnectivity } from './services/exchange';
 import mappingsRouter from './routes/mappings';
 import marketsRouter from './routes/markets';
@@ -13,6 +13,7 @@ import opportunitiesRouter from './routes/opportunities';
 import paperTradesRouter from './routes/paper-trades';
 import demoRouter from './routes/demo';
 import suggestionsRouter from './routes/suggestions';
+import feedRouter from './routes/feed';
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT || '3001', 10);
@@ -57,6 +58,7 @@ app.use('/api/opportunities', opportunitiesRouter);
 app.use('/api/paper-trades', paperTradesRouter);
 app.use('/api/demo', demoRouter);
 app.use('/api/suggestions', suggestionsRouter);
+app.use('/api/feed', feedRouter);
 
 // Initialize database
 getDb();
@@ -81,16 +83,15 @@ const server = app.listen(PORT, () => {
       }
     });
 
-  // Start background services
+  // Start background services (arb scanning is chained after orderbook refresh)
   startIngestion();
-  startArbScanner();
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('[api] Shutting down...');
   stopIngestion();
-  stopArbScanner();
+  // cleanup timer is stopped via stopIngestion()
   server.close();
   closeDb();
 });
@@ -98,7 +99,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('[api] Shutting down...');
   stopIngestion();
-  stopArbScanner();
+  // cleanup timer is stopped via stopIngestion()
   server.close();
   closeDb();
   process.exit(0);

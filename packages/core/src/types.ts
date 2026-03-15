@@ -116,15 +116,53 @@ export interface SimpleOrderbook {
   asks: OrderbookSide[];
 }
 
-// ── Crypto market fields ──
-export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP' | 'DOGE' | 'ENA';
+// ── Market fields ──
+export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'XRP' | 'DOGE' | 'ENA' | 'FED_RATE' | 'CPI' | 'GDP';
+export type MarketAsset = CryptoAsset | string; // event markets use dynamic asset names
+
+export type PredicateType = 'CLOSE_AT' | 'TOUCH_BY' | 'BINARY_EVENT';
 
 export interface CryptoFields {
-  asset: CryptoAsset;
+  asset: CryptoAsset | string;
   expiryTs: number | null;
   predicateDirection: 'ABOVE' | 'BELOW' | null;
   predicateThreshold: number | null;
-  predicateType: 'CLOSE_AT' | 'TOUCH_BY';
+  predicateType: PredicateType;
+}
+
+// ── Category ──
+export type Category = 'CRYPTO' | 'FED' | 'MACRO' | 'EVENT';
+
+// ── Mapping Kind ──
+export type MappingKind = 'manual_unverified' | 'crypto_arb_eligible' | 'auto_approved';
+
+// ── Opportunity Feed ──
+export interface FeedOpportunity {
+  id: string;
+  mappingId: string;
+  category: Category;
+  venueA: string;
+  venueB: string;
+  direction: ArbDirection;
+  label: string;
+  pmYesAsk: number | null;
+  pmNoAsk: number | null;
+  kalshiYesAsk: number | null;
+  kalshiNoAsk: number | null;
+  totalCost: number | null;
+  expectedProfitUsd: number | null;
+  expectedProfitBps: number | null;
+  sizeUsd: number;
+  maxFillUsd: number | null;
+  liquidityScore: number;
+  expiryTs: number | null;
+  mappingKind: MappingKind | null;
+  suspect: boolean;
+  suspectReasons: string | null;
+  pmMarketUrl: string | null;
+  kalshiMarketUrl: string | null;
+  debugJson: string | null;
+  tsUpdated: string;
 }
 
 // ── Mapping suggestion ──

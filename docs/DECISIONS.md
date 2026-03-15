@@ -97,3 +97,62 @@ ON CONFLICT DO UPDATE ... WHERE status = 'suggested'
 ```
 
 This means: once a user approves or rejects a suggestion, re-running `generateSuggestions` will NOT overwrite that status. Approved/rejected suggestions are permanent (the user explicitly acted on them). Only pending `suggested` rows get refreshed with new scores.
+
+---
+
+## V3 Arb Feed Product
+
+### D6: Single-pass Polymarket paginator for all categories
+
+**Date**: 2026-03-14
+
+**Problem**: The plan originally called for separate PM paginator scans per category (crypto, FED, MACRO). Each full scan takes ~75 seconds over ~12,000 markets. Three scans = ~225 seconds of API calls every 10 minutes.
+
+**Decision**: `fetchPolymarketCategorizedMarkets()` makes ONE pass through all PM markets and applies crypto, FED, then MACRO parsers sequentially on each market. Returns a `CategorizedPMMarkets` object with `{ crypto, fed, macro }` arrays.
+
+**Trade-off**: Slightly more complex single function vs. 3x simpler but 3x slower separate scans. Worth it — the 75s scan time is already the bottleneck.
+
+---
+
+### D7: No separate fed-matcher.ts or macro-matcher.ts
+
+**Date**: 2026-03-14
+
+**Problem**: The plan called for creating `fed-matcher.ts` with `scoreFedPair()` and `macro-matcher.ts` with `scoreMacroPair()`. These would be near-identical copies of `crypto-matcher.ts`'s `scorePair()`.
+
+**Decision**: Reuse the existing `scorePair()` in `crypto-matcher.ts`. It already matches by asset, threshold, expiry, and direction — FED markets with `asset='FED_RATE'` and MACRO markets with `asset='CPI'` or `asset='GDP'` are handled by the same generic scoring logic.
+
+**Implication**: `generateSuggestions()` automatically covers all categories. No code duplication, no maintenance burden for parallel matchers.
+
+---
+
+### D8: Category derived from asset field, not stored separately on mappings
+
+**Date**: 2026-03-14
+
+**Problem**: How should the arb engine determine the category of an opportunity?
+
+**Decision**: Derive category from the `asset` field on `canonical_markets`:
+- `FED_RATE` → `FED`
+- `CPI` or `GDP` → `MACRO`
+- Everything else → `CRYPTO`
+
+The `canonical_markets` table has a `category` column set during ingestion, but for the arb engine's feed upsert, we read from the market's `asset` field (joined via the mapping). This avoids a second join and keeps the logic self-contained.
+
+---
+
+### D9: Suspect flagging is category-aware with stale orderbook detection
+
+**Date**: 2026-03-14
+
+**Problem**: V2 had no quality filtering — all detected arbs were shown equally, including false positives from stale data, null prices, or absurd profit calculations.
+
+**Decision**: Opportunities are flagged as `suspect=1` if ANY of:
+1. `totalCost < $0.20` — likely invalid pairing
+2. `profitBps > 5000` — absurdly high, probably bad data
+3. Either side has null ask prices
+4. Either orderbook snapshot is >30 seconds old (stale data)
+
+Suspect opportunities are hidden by default (`hideSuspect=true` in the API). The UI shows a "suspect (hidden)" count in the stats banner and a "Show suspect" toggle to reveal them with yellow borders and reduced opacity.
+
+**Liquidity scoring**: A 0-100 score computed from PM orderbook depth (sum of sizes within depth levels) + Kalshi price availability (100 baseline for having valid prices). Scale: 0 depth = 0, 500+ depth = 100. Displayed on feed cards and available as a sort option.

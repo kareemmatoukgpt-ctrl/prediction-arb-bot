@@ -68,6 +68,12 @@ export const executePaperTrade = (opportunityId: string) =>
 export const ingestCrypto = () =>
   fetchApi('/api/markets/ingest/crypto', { method: 'POST' });
 
+export const ingestFed = () =>
+  fetchApi('/api/markets/ingest/fed', { method: 'POST' });
+
+export const ingestMacro = () =>
+  fetchApi('/api/markets/ingest/macro', { method: 'POST' });
+
 export const getSuggestions = (params: {
   asset?: string; minScore?: number; status?: string; bucket?: string; limit?: number;
 } = {}) => {
@@ -88,3 +94,23 @@ export const approveSuggestion = (id: string) =>
 
 export const rejectSuggestion = (id: string) =>
   fetchApi(`/api/suggestions/${id}/reject`, { method: 'POST' });
+
+// ── Opportunity Feed ──────────────────────────────────────────────────────────
+
+export const getFeed = (params: {
+  category?: string; minEdgeBps?: number; minProfitUsd?: number;
+  sort?: string; hideSuspect?: boolean; hideUnverified?: boolean; limit?: number;
+} = {}) => {
+  const qs = new URLSearchParams();
+  if (params.category) qs.set('category', params.category);
+  if (params.minEdgeBps != null) qs.set('minEdgeBps', String(params.minEdgeBps));
+  if (params.minProfitUsd != null) qs.set('minProfitUsd', String(params.minProfitUsd));
+  if (params.sort) qs.set('sort', params.sort);
+  if (params.hideSuspect != null) qs.set('hideSuspect', String(params.hideSuspect));
+  if (params.hideUnverified != null) qs.set('hideUnverified', String(params.hideUnverified));
+  if (params.limit != null) qs.set('limit', String(params.limit));
+  return fetchApi(`/api/feed?${qs}`);
+};
+
+export const getFeedItem = (id: string) => fetchApi(`/api/feed/${id}`);
+export const getFeedStats = () => fetchApi('/api/feed/stats');

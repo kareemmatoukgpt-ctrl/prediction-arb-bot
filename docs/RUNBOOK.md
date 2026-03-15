@@ -56,7 +56,31 @@ cd infra
 docker-compose up --build
 ```
 
-## Adding a Market Mapping
+## Auto Pipeline
+
+The system runs a fully automated pipeline on startup:
+
+| Job | Interval | What it does |
+|-----|----------|-------------|
+| Market ingestion | 10 min | Single-pass PM paginator (~75s, all categories) + targeted Kalshi series (KXBTCD, KXETHD, KXSOLD, KXFED, KXCPI, KXGDP) |
+| Auto-match | 15 min | Generates cross-venue suggestions via `scorePair()`, auto-approves score >= 90 |
+| Orderbook scan | 5 sec | Fetches orderbooks for all enabled mappings, detects arbs, upserts to feed |
+| Stale cleanup | 1 hour | Deletes opportunities older than 7 days |
+
+Manual triggers are also available:
+- `POST /api/markets/ingest/crypto` — re-ingest crypto markets
+- `POST /api/markets/ingest/fed` — re-ingest FED markets
+- `POST /api/markets/ingest/macro` — re-ingest MACRO markets
+
+## Categories
+
+| Category | Kalshi Series | PM Detection | Asset Field |
+|----------|--------------|--------------|-------------|
+| CRYPTO | KXBTCD, KXETHD, KXSOLD, KXBTC, KXETH, KXSOL | Regex: "bitcoin", "ethereum", etc. + price threshold | BTC, ETH, SOL, XRP, DOGE, ENA |
+| FED | KXFED | Regex: "federal funds rate", "FOMC", "interest rate" | FED_RATE |
+| MACRO | KXCPI, KXGDP | Regex: "CPI", "inflation", "GDP", "gross domestic" | CPI, GDP |
+
+## Adding a Market Mapping (Manual)
 
 1. Go to http://localhost:3000/mappings
 2. Click "+ Add Mapping"
@@ -67,7 +91,27 @@ docker-compose up --build
 
 The system will start scanning orderbooks for this pair automatically.
 
-## Viewing Opportunities
+## Arb Feed (Home Page)
+
+The home page at http://localhost:3000 is the primary opportunity feed. It shows all live arb opportunities across CRYPTO, FED, and MACRO categories.
+
+**Filters:**
+- **Category**: All / Crypto / FED / Macro
+- **Min Edge**: minimum edge in basis points
+- **Sort**: Profit, Edge, Expiry, Liquidity
+- **Show Suspect**: toggle to include flagged opportunities (stale orderbooks, absurd profits, null asks)
+
+**Feed cards show:**
+- Direction badges (PM YES / K NO or PM NO / K YES)
+- Expected profit in USD and basis points
+- Cost per $1.00, expiry countdown, liquidity score
+- Category badge, mapping verification status
+- "Details" link → full breakdown with market URLs
+- "Simulate" button → paper trade execution
+
+**Auto-refresh**: Feed polls every 3 seconds for real-time updates.
+
+## Legacy Opportunities View
 
 1. Go to http://localhost:3000/opportunities
 2. Set minimum edge filter if desired
@@ -131,11 +175,14 @@ real token IDs from the exchanges.
 
 ### No opportunities appearing
 
+- Check the home page stats banner — it shows total count and per-category breakdown
+- If "suspect (hidden)" count > 0, enable "Show suspect" toggle to see flagged opportunities
 - Verify mappings are enabled at /mappings
 - Check that both venues have valid market IDs
 - The buffer (default 50 bps) may be filtering real opportunities
 - Check API logs for ingestion errors
 - Run `curl http://localhost:3001/api/debug/mappings | jq .` to see token IDs
+- Run `curl http://localhost:3001/api/feed/stats | jq .` to see feed statistics
 
 ### API not responding
 

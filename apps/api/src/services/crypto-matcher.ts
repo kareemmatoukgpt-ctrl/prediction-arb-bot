@@ -20,6 +20,7 @@ interface ScoreResult {
   bucket: 'arb_eligible' | 'research';
   expiryDeltaSeconds: number | null;
   thresholdDeltaPct: number | null;
+  typeRisk: string | null;
 }
 
 /**
@@ -39,7 +40,7 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
 
   // Asset must match (hard requirement)
   if (!pm.asset || !kalshi.asset || pm.asset !== kalshi.asset) {
-    return { score: 0, reasons: ['Asset mismatch'], bucket: 'research', expiryDeltaSeconds: null, thresholdDeltaPct: null };
+    return { score: 0, reasons: ['Asset mismatch'], bucket: 'research', expiryDeltaSeconds: null, thresholdDeltaPct: null, typeRisk: null };
   }
   reasons.push(`Asset: ${pm.asset} match`);
   let score = 40;
@@ -48,10 +49,14 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
   const pmType = pm.predicate_type || 'TOUCH_BY';  // PM default is TOUCH_BY (hit/reach/dip)
   const kType = kalshi.predicate_type || 'CLOSE_AT'; // Kalshi default is CLOSE_AT
   let typeArbGate = false;
+  let typeRisk: string | null = null;
   if (pmType === kType) {
     score += 10; reasons.push(`Type: ${pmType}`); typeArbGate = true;
   } else {
-    reasons.push(`Type mismatch (PM=${pmType} K=${kType})`);
+    // TOUCH_BY vs CLOSE_AT are fundamentally different products — different settlement
+    // logic means these are NOT real arbs. Keep as research-only with risk flag.
+    typeRisk = `${pmType} vs ${kType}`;
+    reasons.push(`Type mismatch (PM=${pmType} K=${kType}) — different settlement logic`);
   }
 
   // Expiry proximity (up to +25)
@@ -126,7 +131,7 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
     reasons.push(`Research-only: ${missing.join(', ')}`);
   }
 
-  return { score, reasons, bucket, expiryDeltaSeconds, thresholdDeltaPct };
+  return { score, reasons, bucket, expiryDeltaSeconds, thresholdDeltaPct, typeRisk };
 }
 
 /**
@@ -200,4 +205,76 @@ export function generateSuggestions(minScore = 40): {
 
   console.log(`[crypto-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research})`);
   return { created: total, updated: 0, arb_eligible, research };
+}
+
+/**
+ * Auto-approve high-confidence arb-eligible suggestions.
+ * Replicates the validation logic from the /approve route.
+ * Returns the number of auto-approved mappings.
+ */
+export function autoApproveHighConfidence(): number {
+  const db = getDb();
+  const minScore = parseInt(process.env.AUTO_APPROVE_MIN_SCORE || '90', 10);
+
+  const candidates = db.prepare(`
+    SELECT * FROM mapping_suggestions
+    WHERE status = 'suggested' AND bucket = 'arb_eligible' AND score >= ?
+    ORDER BY score DESC
+  `).all(minScore) as any[];
+
+  if (candidates.length === 0) return 0;
+
+  let approved = 0;
+
+  for (const suggestion of candidates) {
+    // Validate PM market
+    const pmMarket = db.prepare(
+      `SELECT * FROM canonical_markets WHERE venue = 'POLYMARKET' AND venue_market_id = ?`
+    ).get(suggestion.polymarket_market_id) as any;
+    if (!pmMarket || !pmMarket.yes_token_id || !pmMarket.no_token_id || pmMarket.status !== 'open') {
+      continue;
+    }
+
+    // Validate Kalshi market
+    const kalshiMarket = db.prepare(
+      `SELECT * FROM canonical_markets WHERE venue = 'KALSHI' AND venue_market_id = ?`
+    ).get(suggestion.kalshi_market_id) as any;
+    if (!kalshiMarket || !kalshiMarket.yes_token_id || !kalshiMarket.no_token_id || kalshiMarket.status !== 'open') {
+      continue;
+    }
+
+    // Create mapping
+    const label = `${pmMarket.question.slice(0, 60)} <-> ${kalshiMarket.question.slice(0, 60)}`;
+    const mappingId = uuid();
+
+    try {
+      db.prepare(`
+        INSERT INTO match_mappings (id, polymarket_market_id, kalshi_market_id, label, confidence, enabled, mapping_kind)
+        VALUES (?, ?, ?, ?, ?, 1, 'auto_approved')
+      `).run(mappingId, suggestion.polymarket_market_id, suggestion.kalshi_market_id, label, suggestion.score);
+    } catch (err: any) {
+      if (err.message?.includes('UNIQUE constraint')) {
+        // Mapping already exists — only mark approved if the existing mapping is enabled
+        const existing = db.prepare(
+          `SELECT enabled FROM match_mappings WHERE polymarket_market_id = ? AND kalshi_market_id = ?`
+        ).get(suggestion.polymarket_market_id, suggestion.kalshi_market_id) as any;
+        if (existing?.enabled === 1) {
+          db.prepare(`UPDATE mapping_suggestions SET status = 'approved', updated_at = datetime('now') WHERE id = ?`).run(suggestion.id);
+        }
+        continue;
+      }
+      console.error(`[auto-approve] Failed to create mapping:`, err.message);
+      continue;
+    }
+
+    // Update suggestion status
+    db.prepare(`UPDATE mapping_suggestions SET status = 'approved', updated_at = datetime('now') WHERE id = ?`).run(suggestion.id);
+    console.log(`[auto-approve] Created mapping: ${label} (score=${suggestion.score})`);
+    approved++;
+  }
+
+  if (approved > 0) {
+    console.log(`[auto-approve] Auto-approved ${approved} high-confidence mappings (minScore=${minScore})`);
+  }
+  return approved;
 }

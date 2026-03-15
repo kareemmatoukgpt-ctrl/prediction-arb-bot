@@ -1,220 +1,269 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getMappings, getOpportunities, getPaperStats, seedDemo } from '@/lib/api';
+import { getFeed, getFeedStats, executePaperTrade } from '@/lib/api';
 import Link from 'next/link';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-export default function DashboardPage() {
+function formatExpiry(ts: number | null): string {
+  if (!ts) return '';
+  const diff = ts - Math.floor(Date.now() / 1000);
+  if (diff < 0) return 'expired';
+  const d = Math.floor(diff / 86400);
+  const h = Math.floor((diff % 86400) / 3600);
+  const m = Math.floor((diff % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function DirectionBadge({ direction }: { direction: string }) {
+  if (direction === 'BUY_YES_PM_BUY_NO_KALSHI') {
+    return (
+      <span style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+        <span className="venue-badge venue-pm">PM YES</span>
+        <span style={{ color: 'var(--text-dim)', fontSize: '0.65rem' }}>/</span>
+        <span className="venue-badge venue-k">K NO</span>
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+      <span className="venue-badge venue-pm">PM NO</span>
+      <span style={{ color: 'var(--text-dim)', fontSize: '0.65rem' }}>/</span>
+      <span className="venue-badge venue-k">K YES</span>
+    </span>
+  );
+}
+
+export default function FeedPage() {
+  const [opps, setOpps] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
-  const [mappingCount, setMappingCount] = useState<number | null>(null);
-  const [recentOpps, setRecentOpps] = useState<any[]>([]);
-  const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'down'>('checking');
-  const [exchangeMode, setExchangeMode] = useState<string | null>(null);
-  const [seeding, setSeeding] = useState(false);
-  const [seedMsg, setSeedMsg] = useState('');
+  const [category, setCategory] = useState('');
+  const [minEdge, setMinEdge] = useState(0);
+  const [sort, setSort] = useState('profit_desc');
+  const [showSuspect, setShowSuspect] = useState(false);
+  const [apiOk, setApiOk] = useState(true);
+  const [executing, setExecuting] = useState<string | null>(null);
+  const [result, setResult] = useState<any>(null);
 
   async function load() {
     try {
-      const [mappings, opps, paperStats, health] = await Promise.all([
-        getMappings(),
-        getOpportunities({ limit: 5 }),
-        getPaperStats(),
-        fetch(`${API_BASE}/health`).then((r) => r.json()).catch(() => null),
+      const [feed, feedStats] = await Promise.all([
+        getFeed({
+          category: category || undefined,
+          minEdgeBps: minEdge || undefined,
+          sort,
+          hideSuspect: !showSuspect,
+          limit: 50,
+        }),
+        getFeedStats(),
       ]);
-      setMappingCount(mappings.length);
-      setRecentOpps(opps);
-      setStats(paperStats);
-      setApiStatus('ok');
-      if (health?.exchangeMode) setExchangeMode(health.exchangeMode);
+      setOpps(Array.isArray(feed) ? feed : []);
+      setStats(feedStats);
+      setApiOk(true);
     } catch {
-      setApiStatus('down');
+      setApiOk(false);
     }
   }
 
-  useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv); }, []);
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 3000);
+    return () => clearInterval(iv);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, minEdge, sort, showSuspect]);
 
-  async function handleSeedDemo() {
-    setSeeding(true);
-    setSeedMsg('');
+  async function handleSimulate(oppId: string, mappingId: string) {
+    setExecuting(oppId);
+    setResult(null);
     try {
-      const result = await seedDemo();
-      setSeedMsg(result.message);
-      await load();
+      // The paper trade API expects an opportunity from arb_opportunities, not from feed.
+      // Look for matching arb_opportunity
+      const res = await executePaperTrade(oppId);
+      setResult(res);
     } catch (err: any) {
-      setSeedMsg('Error: ' + err.message);
+      setResult({ status: 'FAILED', result: { pnl: 0, failureReason: err.message } });
     }
-    setSeeding(false);
+    setExecuting(null);
   }
 
   return (
     <>
-      <div className="page-header">
-        <h1>Prediction Arb Bot</h1>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span className="badge badge-yellow">V1 — Paper Trading</span>
-          {exchangeMode && (
-            <span
-              className={`badge ${exchangeMode === 'live' ? 'badge-green' : 'badge-yellow'}`}
-              title={exchangeMode === 'live' ? 'Connected to real Polymarket + Kalshi APIs' : 'Using mock data — no real exchange connection'}
-            >
-              {exchangeMode === 'live' ? 'LIVE' : 'MOCK'}
-            </span>
+      {/* Header banner */}
+      <div style={{ marginTop: '0.5rem', marginBottom: '1.5rem' }}>
+        <div className="feed-total-label">Available Profit</div>
+        <div className="feed-total profit">
+          ${stats?.totalProfit?.toFixed(2) ?? '0.00'}
+        </div>
+        <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.75rem' }}>
+          <div>
+            <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>{stats?.count ?? 0}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>opportunities</span>
+          </div>
+          <div>
+            <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>{stats?.maxEdgeBps ?? 0}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>max edge (bps)</span>
+          </div>
+          {stats?.byCategory?.length > 0 && stats.byCategory.map((c: any) => (
+            <div key={c.category}>
+              <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>{c.count}</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>{c.category}</span>
+            </div>
+          ))}
+          {stats?.suspectCount > 0 && (
+            <div>
+              <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--yellow)' }}>{stats.suspectCount}</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '0.3rem' }}>suspect (hidden)</span>
+            </div>
           )}
         </div>
       </div>
 
-      {/* API Status Banner */}
-      {apiStatus === 'down' && (
+      {/* API down banner */}
+      {!apiOk && (
         <div className="card" style={{ borderColor: 'var(--red)', marginBottom: '1rem' }}>
           <strong style={{ color: 'var(--red)' }}>API server is not running</strong>
-          <p style={{ fontSize: '0.85rem', marginTop: '0.4rem', color: 'var(--text-muted)' }}>
-            Start it in a terminal:{' '}
-            <code style={{ background: '#1a1a1a', padding: '0.1rem 0.4rem', borderRadius: '3px' }}>
-              npm run dev:api
-            </code>{' '}
-            from the project root. Then refresh this page.
+          <p style={{ fontSize: '0.82rem', marginTop: '0.3rem', color: 'var(--text-muted)' }}>
+            Run <code style={{ background: 'var(--bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>npm run dev:api</code> from the project root.
           </p>
         </div>
       )}
 
-      {/* How it works + demo seed */}
-      {apiStatus === 'ok' && mappingCount === 0 && (
-        <div className="card" style={{ marginBottom: '1rem', borderColor: 'var(--accent)' }}>
-          <h2 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>How this works</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.7' }}>
-            <strong style={{ color: 'var(--text)' }}>Polymarket</strong> and{' '}
-            <strong style={{ color: 'var(--text)' }}>Kalshi</strong> are two separate prediction market
-            platforms. The same real-world question exists on both — e.g. &quot;Will the Fed cut rates in
-            June?&quot; — but at slightly different prices.
-            <br /><br />
-            A <strong style={{ color: 'var(--text)' }}>mapping</strong> tells the bot which market on
-            Polymarket equals which market on Kalshi. Once mapped, the bot watches both orderbooks and
-            detects <strong style={{ color: 'var(--text)' }}>arbitrage</strong>: if buying YES on one side
-            + NO on the other costs less than $1 total, that&apos;s a risk-free profit (since exactly one
-            side always pays out $1).
+      {/* Filter bar */}
+      <div className="filter-bar">
+        <select value={category} onChange={e => setCategory(e.target.value)}>
+          <option value="">All Categories</option>
+          <option value="CRYPTO">Crypto</option>
+          <option value="FED">FED</option>
+          <option value="MACRO">Macro</option>
+          <option value="EVENT">Event</option>
+        </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+          <label style={{ margin: 0, display: 'inline', fontSize: '0.72rem' }}>Min edge:</label>
+          <input
+            type="number"
+            value={minEdge}
+            onChange={e => setMinEdge(parseInt(e.target.value) || 0)}
+            style={{ width: '70px' }}
+            placeholder="bps"
+          />
+        </div>
+        <select value={sort} onChange={e => setSort(e.target.value)}>
+          <option value="profit_desc">Profit (high to low)</option>
+          <option value="profit_asc">Profit (low to high)</option>
+          <option value="edge_desc">Edge (high to low)</option>
+          <option value="expiry_asc">Expiry (soonest)</option>
+          <option value="liquidity_desc">Liquidity (highest)</option>
+        </select>
+        <label style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontSize: '0.72rem' }}>
+          <input type="checkbox" checked={showSuspect} onChange={e => setShowSuspect(e.target.checked)} />
+          Show suspect
+        </label>
+      </div>
+
+      {/* Paper trade result */}
+      {result && (
+        <div className="card" style={{ borderColor: result.status === 'SIMULATED' ? 'var(--green)' : 'var(--red)', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+              Paper Trade: <span className={`badge ${result.status === 'SIMULATED' ? 'badge-green' : 'badge-red'}`}>{result.status}</span>
+            </span>
+            <span className={result.result?.pnl >= 0 ? 'profit' : 'loss'} style={{ fontSize: '1rem' }}>
+              ${result.result?.pnl?.toFixed(4) ?? '0'}
+            </span>
+          </div>
+          {result.result?.failureReason && (
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>{result.result.failureReason}</p>
+          )}
+        </div>
+      )}
+
+      {/* Feed cards */}
+      {opps.length === 0 ? (
+        <div className="card empty-state">
+          <h2>No opportunities detected</h2>
+          <p>
+            The scanner runs every 5 seconds across all enabled mappings.
+            {stats?.suspectCount > 0
+              ? ` There are ${stats.suspectCount} suspect opportunities hidden — enable "Show suspect" to see them.`
+              : ' Try going to Markets and clicking "Ingest Crypto" to discover markets, then Suggestions to generate matches.'}
           </p>
-          <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <button className="btn btn-primary" onClick={handleSeedDemo} disabled={seeding}>
-              {seeding ? 'Loading...' : 'Load Demo Data (3 market pairs)'}
-            </button>
-            {seedMsg && (
-              <span style={{ fontSize: '0.85rem', color: 'var(--green)' }}>{seedMsg}</span>
-            )}
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
+            <Link href="/markets"><button className="btn btn-sm">Markets</button></Link>
+            <Link href="/suggestions"><button className="btn btn-sm">Suggestions</button></Link>
+            <Link href="/mappings"><button className="btn btn-sm">Mappings</button></Link>
           </div>
         </div>
-      )}
-
-      {/* Stats */}
-      {apiStatus === 'ok' && (
-        <div className="stats-grid">
-          <div className="card stat-card">
-            <div className="stat-value">{mappingCount ?? '—'}</div>
-            <div className="stat-label">Mapped Market Pairs</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-              Polymarket ↔ Kalshi
-            </div>
-          </div>
-          <div className="card stat-card">
-            <div className="stat-value">{recentOpps.length}</div>
-            <div className="stat-label">Active Opportunities</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-              Arb detected right now
-            </div>
-          </div>
-          <div className="card stat-card">
-            <div className="stat-value">{stats?.totalTrades ?? 0}</div>
-            <div className="stat-label">Paper Trades Run</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-              Simulated executions
-            </div>
-          </div>
-          <div className="card stat-card">
-            <div className={`stat-value ${(stats?.totalPnl || 0) >= 0 ? 'profit' : 'loss'}`}>
-              ${(stats?.totalPnl || 0).toFixed(2)}
-            </div>
-            <div className="stat-label">Simulated PnL</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-              Paper trading only
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Live opportunities table */}
-      {apiStatus === 'ok' && recentOpps.length > 0 && (
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-            <h2 style={{ fontSize: '1rem' }}>Live Arb Opportunities</h2>
-            <Link href="/opportunities" style={{ fontSize: '0.8rem' }}>View all →</Link>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Market</th>
-                <th>Strategy</th>
-                <th title="sum of YES + NO ask prices; must be < $1.00 for arb">Total Cost</th>
-                <th>Edge (bps)</th>
-                <th>Profit ($100 size)</th>
-                <th>Detected</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentOpps.map((opp: any) => (
-                <tr key={opp.id}>
-                  <td style={{ fontWeight: 500 }}>{opp.mapping_label}</td>
-                  <td>
-                    <span className="badge badge-blue" style={{ fontSize: '0.68rem' }}>
-                      {opp.direction === 'BUY_YES_PM_BUY_NO_KALSHI'
-                        ? 'YES on Poly / NO on Kalshi'
-                        : 'NO on Poly / YES on Kalshi'}
+      ) : (
+        <div>
+          {opps.map((opp: any) => {
+            const isSuspect = opp.suspect === 1;
+            return (
+              <div
+                key={opp.id}
+                className="card card-feed feed-card"
+                style={isSuspect ? { borderColor: 'var(--yellow)', opacity: 0.7 } : {}}
+              >
+                <div className="feed-card-left">
+                  <div className="feed-label">
+                    {isSuspect && <span className="badge badge-yellow" style={{ marginRight: '0.4rem', fontSize: '0.6rem' }}>SUSPECT</span>}
+                    {opp.mapping_kind === 'manual_unverified' && (
+                      <span className="badge badge-red" style={{ marginRight: '0.4rem', fontSize: '0.6rem' }}>UNVERIFIED</span>
+                    )}
+                    {opp.label}
+                  </div>
+                  <div className="feed-direction" style={{ marginTop: '0.35rem' }}>
+                    <DirectionBadge direction={opp.direction} />
+                  </div>
+                  <div className="feed-meta">
+                    <span className="feed-meta-item">
+                      <span className="badge badge-purple" style={{ fontSize: '0.6rem' }}>{opp.category}</span>
                     </span>
-                  </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
-                    ${(opp.cost_yes + opp.cost_no).toFixed(3)}
-                    <span style={{ color: 'var(--text-muted)' }}> / $1.00</span>
-                  </td>
-                  <td className="profit">{opp.expected_profit_bps}</td>
-                  <td className="profit">${opp.expected_profit_usd?.toFixed(2)}</td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                    {new Date(opp.ts).toLocaleTimeString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
-            Go to <Link href="/opportunities">Opportunities</Link> → click &quot;Simulate Execute&quot; to run a paper trade.
-          </p>
-        </div>
-      )}
-
-      {apiStatus === 'ok' && mappingCount !== null && mappingCount > 0 && recentOpps.length === 0 && (
-        <div className="card">
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            No arb opportunities detected yet. The scanner runs every 5 seconds.{' '}
-            Go to <Link href="/opportunities">Opportunities</Link> and click &quot;Scan Now&quot; to force a check.
-          </p>
-        </div>
-      )}
-
-      {/* Nav cards */}
-      {apiStatus === 'ok' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginTop: '0.5rem' }}>
-          {[
-            { href: '/mappings', icon: '🗺', title: 'Mappings', sub: 'Configure which markets to watch' },
-            { href: '/opportunities', icon: '⚡', title: 'Opportunities', sub: 'Live arb feed + simulate execute' },
-            { href: '/paper', icon: '📊', title: 'Paper Trading', sub: 'Simulated trade history & PnL' },
-          ].map((card) => (
-            <Link key={card.href} href={card.href} style={{ textDecoration: 'none' }}>
-              <div className="card" style={{ textAlign: 'center', cursor: 'pointer' }}>
-                <div style={{ fontSize: '1.5rem', marginBottom: '0.3rem' }}>{card.icon}</div>
-                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{card.title}</div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>{card.sub}</div>
+                    {opp.arb_type && opp.arb_type !== 'cross_venue' && (
+                      <span className="feed-meta-item">
+                        <span className="badge badge-yellow" style={{ fontSize: '0.6rem' }}>{opp.arb_type.toUpperCase()}</span>
+                      </span>
+                    )}
+                    {opp.expiry_ts && (
+                      <span className="feed-meta-item">Expires: {formatExpiry(opp.expiry_ts)}</span>
+                    )}
+                    <span className="feed-meta-item">
+                      Cost: ${opp.total_cost?.toFixed(3)} / $1.00
+                    </span>
+                    {opp.liquidity_score > 0 && (
+                      <span className="feed-meta-item">Liq: {opp.liquidity_score}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="feed-card-right">
+                  <div className="feed-profit">${opp.expected_profit_usd?.toFixed(2)}</div>
+                  <div className="feed-edge">{opp.expected_profit_bps} bps</div>
+                  <div className="feed-prices">
+                    {opp.direction === 'BUY_YES_PM_BUY_NO_KALSHI'
+                      ? `PM: ${opp.pm_yes_ask?.toFixed(3)}c / K: ${opp.kalshi_no_ask?.toFixed(3)}c`
+                      : `PM: ${opp.pm_no_ask?.toFixed(3)}c / K: ${opp.kalshi_yes_ask?.toFixed(3)}c`
+                    }
+                  </div>
+                  <div className="feed-actions">
+                    <Link href={`/feed/${opp.id}`}>
+                      <button className="btn btn-sm btn-ghost">Details</button>
+                    </Link>
+                    {!isSuspect && opp.mapping_kind !== 'manual_unverified' && (
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={() => handleSimulate(opp.id, opp.mapping_id)}
+                        disabled={executing === opp.id}
+                      >
+                        {executing === opp.id ? 'Simulating...' : 'Simulate'}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-            </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </>

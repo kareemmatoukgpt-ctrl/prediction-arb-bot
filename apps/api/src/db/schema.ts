@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 );
 
 CREATE INDEX IF NOT EXISTS idx_paper_ts ON paper_trades(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_paper_opportunity ON paper_trades(opportunity_id);
 
 CREATE TABLE IF NOT EXISTS mapping_suggestions (
   id TEXT PRIMARY KEY,
@@ -90,6 +91,38 @@ CREATE TABLE IF NOT EXISTS mapping_suggestions (
   UNIQUE(polymarket_market_id, kalshi_market_id)
 );
 CREATE INDEX IF NOT EXISTS idx_suggestions_status ON mapping_suggestions(status, bucket);
+
+CREATE TABLE IF NOT EXISTS opportunity_feed (
+  id TEXT PRIMARY KEY,
+  mapping_id TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'CRYPTO',
+  venue_a TEXT NOT NULL DEFAULT 'POLYMARKET',
+  venue_b TEXT NOT NULL DEFAULT 'KALSHI',
+  direction TEXT NOT NULL,
+  label TEXT NOT NULL,
+  pm_yes_ask REAL,
+  pm_no_ask REAL,
+  kalshi_yes_ask REAL,
+  kalshi_no_ask REAL,
+  total_cost REAL,
+  expected_profit_usd REAL,
+  expected_profit_bps INTEGER,
+  size_usd REAL NOT NULL DEFAULT 100,
+  max_fill_usd REAL,
+  liquidity_score INTEGER DEFAULT 0,
+  expiry_ts INTEGER,
+  mapping_kind TEXT,
+  suspect INTEGER NOT NULL DEFAULT 0,
+  suspect_reasons TEXT,
+  pm_market_url TEXT,
+  kalshi_market_url TEXT,
+  debug_json TEXT,
+  ts_updated TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(mapping_id, direction)
+);
+CREATE INDEX IF NOT EXISTS idx_feed_category ON opportunity_feed(category);
+CREATE INDEX IF NOT EXISTS idx_feed_profit ON opportunity_feed(expected_profit_bps DESC);
+CREATE INDEX IF NOT EXISTS idx_feed_suspect ON opportunity_feed(suspect);
 `;
 
 let db: any = null;
@@ -149,6 +182,30 @@ function runMigrations(database: any): void {
   if (!mappingCols.includes('mapping_kind')) {
     console.log(`[db] Adding column match_mappings.mapping_kind`);
     database.exec(`ALTER TABLE match_mappings ADD COLUMN mapping_kind TEXT NOT NULL DEFAULT 'manual_unverified'`);
+  }
+
+  // Migration: add category column to canonical_markets
+  if (!existingCols.includes('category')) {
+    console.log(`[db] Adding column canonical_markets.category`);
+    database.exec(`ALTER TABLE canonical_markets ADD COLUMN category TEXT`);
+  }
+
+  // Migration: add type_risk and arb_type columns to opportunity_feed
+  const feedCols = (database.pragma('table_info(opportunity_feed)') as any[]).map((r: any) => r.name);
+  if (!feedCols.includes('type_risk')) {
+    console.log(`[db] Adding column opportunity_feed.type_risk`);
+    database.exec(`ALTER TABLE opportunity_feed ADD COLUMN type_risk TEXT`);
+  }
+  if (!feedCols.includes('arb_type')) {
+    console.log(`[db] Adding column opportunity_feed.arb_type`);
+    database.exec(`ALTER TABLE opportunity_feed ADD COLUMN arb_type TEXT DEFAULT 'cross_venue'`);
+  }
+
+  // Migration: add event_group columns to canonical_markets
+  if (!existingCols.includes('event_group')) {
+    console.log(`[db] Adding column canonical_markets.event_group`);
+    database.exec(`ALTER TABLE canonical_markets ADD COLUMN event_group TEXT`);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_markets_event_group ON canonical_markets(event_group)`);
   }
 }
 

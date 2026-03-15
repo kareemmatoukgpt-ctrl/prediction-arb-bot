@@ -61,9 +61,9 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
 
   // Expiry proximity (up to +25)
   // Expiry gate depends on predicate type:
-  //   CLOSE_AT: both must expire within 4h (contracts must settle at same time)
+  //   CLOSE_AT: within 24h — PM and Kalshi often set different close times for the same event
   //   TOUCH_BY: within 24h is acceptable (both "touch by" a similar deadline)
-  const maxExpiryForArb = (pmType === 'TOUCH_BY' && kType === 'TOUCH_BY') ? 86400 : 14400;
+  const maxExpiryForArb = (pmType === kType) ? 86400 : 14400;
   let expiryDeltaSeconds: number | null = null;
   let expiryArbGate = false;
   if (pm.expiry_ts && kalshi.expiry_ts) {
@@ -74,7 +74,7 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
       score += 20; reasons.push('Expiry within 4h'); expiryArbGate = true;
     } else if (expiryDeltaSeconds <= 86400) {
       score += 10; reasons.push('Expiry within 24h');
-      if (maxExpiryForArb >= 86400) expiryArbGate = true;
+      expiryArbGate = maxExpiryForArb >= 86400;
     } else if (expiryDeltaSeconds <= 604800) {
       score += 5; reasons.push('Expiry within 7 days');
     } else {

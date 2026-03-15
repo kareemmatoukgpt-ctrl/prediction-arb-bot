@@ -8,8 +8,6 @@
     "start": "node dist/index.js",
     "db:migrate": "tsx src/db/migrate.ts",
     "smoke:live": "tsx src/scripts/smoke-live.ts",
-    "verify:live": "tsx src/scripts/verify-live.ts",
-    "verify:crypto-mapping": "tsx src/scripts/verify-crypto-mapping.ts",
     "verify:arb-eligible": "tsx src/scripts/verify-arb-eligible.ts",
     "test:parsing": "tsx src/scripts/test-parsing.ts",
     "diagnose": "tsx src/scripts/diagnose-pipeline.ts"

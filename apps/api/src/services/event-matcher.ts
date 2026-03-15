@@ -137,10 +137,10 @@ export function scoreEventPair(pm: EventMarketRow, kalshi: EventMarketRow): Even
   reasons.push(`Entity similarity: ${(entitySimilarity * 100).toFixed(0)}%`);
   reasons.push(`Combined: ${(combinedSimilarity * 100).toFixed(0)}%`);
 
-  // Determine bucket
-  const bucket = combinedSimilarity >= 0.6 ? 'arb_eligible' : 'research';
+  // Determine bucket — 0.50 threshold balances coverage vs quality for event markets
+  const bucket = combinedSimilarity >= 0.5 ? 'arb_eligible' : 'research';
   if (bucket === 'research') {
-    reasons.push('Research-only: similarity < 60%');
+    reasons.push('Research-only: similarity < 50%');
   }
 
   return { score, reasons, bucket, similarity: combinedSimilarity };

@@ -320,7 +320,7 @@ async function runAutoMatchPipeline(): Promise<void> {
   try {
     const start = Date.now();
     const suggestions = generateSuggestions(40);
-    const eventSuggs = generateEventSuggestions(50);
+    const eventSuggs = generateEventSuggestions(35);
     const approved = autoApproveHighConfidence();
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
     console.log(`[auto-match] Pipeline done in ${elapsed}s: ${suggestions.arb_eligible} crypto arb-eligible, ${eventSuggs.arb_eligible} event arb-eligible, ${approved} auto-approved`);

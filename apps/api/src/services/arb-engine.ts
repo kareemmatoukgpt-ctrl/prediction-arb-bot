@@ -29,9 +29,9 @@ function computeLiquidityScore(pmSnapshot: any, kalshiSnapshot: any): number {
 
 function getCostParams(): CostModelParams {
   return {
-    polymarketTakerFeeBps: parseInt(process.env.PM_TAKER_FEE_BPS || '0', 10),
-    kalshiTakerFeeBps: parseInt(process.env.KALSHI_TAKER_FEE_BPS || '0', 10),
-    slippageBps: parseInt(process.env.SLIPPAGE_BPS || '10', 10),
+    polymarketTakerFeeBps: parseInt(process.env.PM_TAKER_FEE_BPS || '100', 10),   // PM: ~1% effective fee
+    kalshiTakerFeeBps: parseInt(process.env.KALSHI_TAKER_FEE_BPS || '70', 10),     // Kalshi: ~0.7% taker fee
+    slippageBps: parseInt(process.env.SLIPPAGE_BPS || '50', 10),                    // 50bps slippage per side
     arbThresholdBps: parseInt(process.env.ARB_THRESHOLD_BPS || '50', 10),
   };
 }
@@ -67,6 +67,8 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
     JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
     JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
     WHERE m.enabled = 1
+      AND pm.status = 'open'
+      AND k.status = 'open'
   `).all() as any[];
 
   const latestSnapshot = db.prepare(`

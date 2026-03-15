@@ -333,7 +333,7 @@ async function runAutoMatchPipeline(): Promise<void> {
 
 export function startIngestion(): void {
   const marketInterval = parseInt(process.env.MARKET_REFRESH_INTERVAL_MS || '600000', 10);
-  const orderbookInterval = parseInt(process.env.ORDERBOOK_REFRESH_INTERVAL_MS || '5000', 10);
+  const orderbookInterval = parseInt(process.env.ORDERBOOK_REFRESH_INTERVAL_MS || '15000', 10);
   const matchInterval = parseInt(process.env.MATCH_INTERVAL_MS || '900000', 10);
 
   console.log(`[ingestion] Starting market refresh every ${marketInterval}ms`);

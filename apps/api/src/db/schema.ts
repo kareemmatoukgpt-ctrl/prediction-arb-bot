@@ -123,6 +123,8 @@ CREATE TABLE IF NOT EXISTS opportunity_feed (
 CREATE INDEX IF NOT EXISTS idx_feed_category ON opportunity_feed(category);
 CREATE INDEX IF NOT EXISTS idx_feed_profit ON opportunity_feed(expected_profit_bps DESC);
 CREATE INDEX IF NOT EXISTS idx_feed_suspect ON opportunity_feed(suspect);
+CREATE INDEX IF NOT EXISTS idx_feed_suspect_profit ON opportunity_feed(suspect, expected_profit_bps DESC);
+CREATE INDEX IF NOT EXISTS idx_markets_status_venue ON canonical_markets(status, venue);
 `;
 
 let db: any = null;

@@ -189,24 +189,6 @@ router.get('/health', (_req: any, res: any) => {
     FROM opportunity_feed GROUP BY category ORDER BY cnt DESC
   `).all() as any[];
 
-  // Gate analysis (sample up to 5000 research suggestions)
-  const gates: Record<string, number> = { type_blocked: 0, expiry_blocked: 0, threshold_blocked: 0, direction_blocked: 0 };
-  const researchRows = db.prepare(`
-    SELECT reasons_json FROM mapping_suggestions WHERE bucket = 'research' LIMIT 5000
-  `).all() as any[];
-
-  for (const row of researchRows) {
-    try {
-      const reasons: string[] = JSON.parse(row.reasons_json);
-      const block = reasons.find((r: string) => r.startsWith('Research-only:'));
-      if (!block) continue;
-      if (block.includes('type mismatch')) gates.type_blocked++;
-      if (block.includes('expiry>')) gates.expiry_blocked++;
-      if (block.includes('threshold>')) gates.threshold_blocked++;
-      if (block.includes('direction mismatch')) gates.direction_blocked++;
-    } catch { /* skip */ }
-  }
-
   res.json({
     markets,
     marketsByCategory,
@@ -220,7 +202,6 @@ router.get('/health', (_req: any, res: any) => {
       byArbType: oppsByArbType,
       byCategory: oppsByCategory,
     },
-    gates,
   });
 });
 

@@ -10,12 +10,10 @@ export default function PaperTradingPage() {
 
   async function load() {
     try {
-      const [tradeData, statsData] = await Promise.all([
-        getPaperTrades(100),
-        getPaperStats(),
-      ]);
-      setTrades(tradeData);
-      setStats(statsData);
+      const tradeData = await getPaperTrades(100).catch(() => null);
+      const statsData = await getPaperStats().catch(() => null);
+      if (tradeData !== null) setTrades(tradeData);
+      if (statsData !== null) setStats(statsData);
     } catch (err: any) {
       setError(err.message);
     }

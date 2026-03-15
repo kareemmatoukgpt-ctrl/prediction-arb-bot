@@ -495,7 +495,7 @@ export async function fetchKalshiMarkets(
 
     return markets.map((m: any) => ({
       venueMarketId: m.ticker,
-      question: m.title || m.question || '',
+      question: (m.title || m.question || '').replace(/\*\*/g, ''),
       url: `https://kalshi.com/markets/${m.ticker}`,
       // Kalshi uses 'active'/'finalized'; normalize to the DB's allowed values
       status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',

@@ -55,7 +55,7 @@ function SuggestionCard({ s, tab, onApprove, onReject, actionMsg }: {
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
             <span className="badge badge-blue">PM</span>
           </div>
-          <div style={{ fontSize: '0.85rem' }}>{s.pm_question || s.polymarket_market_id}</div>
+          <div style={{ fontSize: '0.85rem' }}>{(s.pm_question || s.polymarket_market_id).replace(/\*\*/g, '')}</div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
             Expires: {formatExpiry(s.pm_expiry_ts)}
             {s.pm_threshold != null && ` \u00b7 $${Number(s.pm_threshold).toLocaleString()}`}
@@ -71,7 +71,7 @@ function SuggestionCard({ s, tab, onApprove, onReject, actionMsg }: {
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
             <span className="badge badge-yellow">K</span>
           </div>
-          <div style={{ fontSize: '0.85rem' }}>{s.k_question || s.kalshi_market_id}</div>
+          <div style={{ fontSize: '0.85rem' }}>{(s.k_question || s.kalshi_market_id).replace(/\*\*/g, '')}</div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
             Expires: {formatExpiry(s.k_expiry_ts)}
             {s.k_threshold != null && ` \u00b7 $${Number(s.k_threshold).toLocaleString()}`}
@@ -264,7 +264,7 @@ export default function SuggestionsPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.5rem' }}>
                     <div style={{ flex: 1 }}>
                       <span className="badge badge-blue" style={{ marginRight: '0.3rem' }}>PM</span>
-                      <span style={{ fontSize: '0.85rem' }}>{s.pm_question || s.polymarket_market_id}</span>
+                      <span style={{ fontSize: '0.85rem' }}>{(s.pm_question || s.polymarket_market_id).replace(/\*\*/g, '')}</span>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
                         Expires: {formatExpiry(s.pm_expiry_ts)}
                         {s.pm_threshold != null && ` \u00b7 $${Number(s.pm_threshold).toLocaleString()}`}
@@ -275,7 +275,7 @@ export default function SuggestionsPage() {
                     </div>
                     <div style={{ flex: 1, textAlign: 'right' }}>
                       <span className="badge badge-yellow" style={{ marginRight: '0.3rem' }}>K</span>
-                      <span style={{ fontSize: '0.85rem' }}>{s.k_question || s.kalshi_market_id}</span>
+                      <span style={{ fontSize: '0.85rem' }}>{(s.k_question || s.kalshi_market_id).replace(/\*\*/g, '')}</span>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
                         Expires: {formatExpiry(s.k_expiry_ts)}
                         {s.k_threshold != null && ` \u00b7 $${Number(s.k_threshold).toLocaleString()}`}

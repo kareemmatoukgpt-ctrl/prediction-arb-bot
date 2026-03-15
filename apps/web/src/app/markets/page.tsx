@@ -161,7 +161,11 @@ export default function MarketsPage() {
               {markets.map((m: any) => (
                 <tr key={m.id}>
                   <td style={{ maxWidth: '350px' }}>
-                    <a href={m.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.85rem' }}>{m.question}</a>
+                    {m.url && !m.url.includes('/mock') ? (
+                      <a href={m.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.85rem' }}>{m.question.replace(/\*\*/g, '')}</a>
+                    ) : (
+                      <span style={{ fontSize: '0.85rem' }}>{m.question.replace(/\*\*/g, '')}</span>
+                    )}
                   </td>
                   <td>
                     <span className={`badge ${m.venue === 'POLYMARKET' ? 'badge-blue' : 'badge-yellow'}`}>

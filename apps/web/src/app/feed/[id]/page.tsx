@@ -73,7 +73,7 @@ export default function FeedDetailPage() {
           {opp.mapping_kind === 'auto_approved' && <span className="badge badge-green">AUTO-APPROVED</span>}
           {opp.mapping_kind === 'crypto_arb_eligible' && <span className="badge badge-green">ARB-ELIGIBLE</span>}
         </div>
-        <h1 style={{ fontSize: '1.3rem', fontWeight: 700, lineHeight: 1.3 }}>{opp.label}</h1>
+        <h1 style={{ fontSize: '1.3rem', fontWeight: 700, lineHeight: 1.3 }}>{opp.label?.replace(/\*\*/g, '')}</h1>
       </div>
 
       {/* Suspect warning */}

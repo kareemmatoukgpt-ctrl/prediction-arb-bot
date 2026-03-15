@@ -42,6 +42,27 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
   if (!pm.asset || !kalshi.asset || pm.asset !== kalshi.asset) {
     return { score: 0, reasons: ['Asset mismatch'], bucket: 'research', expiryDeltaSeconds: null, thresholdDeltaPct: null, typeRisk: null };
   }
+
+  // Region/country mismatch check: reject "Mexico GDP" vs "US real GDP", etc.
+  const pmQ = pm.question.toLowerCase();
+  const kQ = kalshi.question.toLowerCase();
+  const regions = ['mexico', 'eurozone', 'canada', 'uk', 'china', 'japan', 'germany', 'france', 'india', 'brazil'];
+  for (const region of regions) {
+    const pmHas = pmQ.includes(region);
+    const kHas = kQ.includes(region);
+    if (pmHas !== kHas) {
+      return { score: 0, reasons: [`Region mismatch: "${region}" in one but not the other`], bucket: 'research', expiryDeltaSeconds: null, thresholdDeltaPct: null, typeRisk: null };
+    }
+  }
+
+  // Question semantic check: "between X% and Y%" ≠ "more than X%"
+  const pmBetween = /between\s+[\d.]+%?\s+and\s+[\d.]+%/i.test(pm.question);
+  const pmLessThan = /less than|under|below/i.test(pm.question);
+  const kAbove = /more than|above|greater than|over/i.test(kalshi.question);
+  if ((pmBetween || pmLessThan) && kAbove) {
+    return { score: 0, reasons: ['Question type mismatch: range/below vs above'], bucket: 'research', expiryDeltaSeconds: null, thresholdDeltaPct: null, typeRisk: null };
+  }
+
   reasons.push(`Asset: ${pm.asset} match`);
   let score = 40;
 

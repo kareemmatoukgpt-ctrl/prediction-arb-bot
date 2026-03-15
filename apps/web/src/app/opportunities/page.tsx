@@ -21,7 +21,7 @@ export default function OpportunitiesPage() {
     }
   }
 
-  useEffect(() => { load(); const iv = setInterval(load, 5000); return () => clearInterval(iv); }, [minEdge]);
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [minEdge]);
 
   async function handleScan() {
     setScanning(true);

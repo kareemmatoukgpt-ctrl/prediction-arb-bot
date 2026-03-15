@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getFeed, getFeedStats, executePaperTrade } from '@/lib/api';
 import Link from 'next/link';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+function stripMarkdown(text: string): string {
+  return text.replace(/\*\*/g, '');
+}
 
 function formatExpiry(ts: number | null): string {
   if (!ts) return '';
@@ -47,24 +49,40 @@ export default function FeedPage() {
   const [apiOk, setApiOk] = useState(true);
   const [executing, setExecuting] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+  const loadingRef = useRef(false);
 
   async function load() {
+    // Prevent overlapping fetches
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     try {
-      const [feed, feedStats] = await Promise.all([
-        getFeed({
-          category: category || undefined,
-          minEdgeBps: minEdge || undefined,
-          sort,
-          hideSuspect: !showSuspect,
-          limit: 50,
-        }),
-        getFeedStats(),
-      ]);
-      setOpps(Array.isArray(feed) ? feed : []);
-      setStats(feedStats);
-      setApiOk(true);
-    } catch {
-      setApiOk(false);
+      // Fetch feed and stats independently so one failure doesn't kill both
+      const feedPromise = getFeed({
+        category: category || undefined,
+        minEdgeBps: minEdge || undefined,
+        sort,
+        hideSuspect: !showSuspect,
+        limit: 50,
+      });
+      const statsPromise = getFeedStats();
+
+      const feed = await feedPromise.catch(() => null);
+      const feedStats = await statsPromise.catch(() => null);
+
+      // Only update state if we got valid data — never clear on failure
+      if (feed !== null) {
+        setOpps(Array.isArray(feed) ? feed : []);
+        setApiOk(true);
+      }
+      if (feedStats !== null) {
+        setStats(feedStats);
+        setApiOk(true);
+      }
+      if (feed === null && feedStats === null) {
+        setApiOk(false);
+      }
+    } finally {
+      loadingRef.current = false;
     }
   }
 
@@ -75,12 +93,10 @@ export default function FeedPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, minEdge, sort, showSuspect]);
 
-  async function handleSimulate(oppId: string, mappingId: string) {
+  async function handleSimulate(oppId: string) {
     setExecuting(oppId);
     setResult(null);
     try {
-      // The paper trade API expects an opportunity from arb_opportunities, not from feed.
-      // Look for matching arb_opportunity
       const res = await executePaperTrade(oppId);
       setResult(res);
     } catch (err: any) {
@@ -124,9 +140,9 @@ export default function FeedPage() {
       {/* API down banner */}
       {!apiOk && (
         <div className="card" style={{ borderColor: 'var(--red)', marginBottom: '1rem' }}>
-          <strong style={{ color: 'var(--red)' }}>API server is not running</strong>
+          <strong style={{ color: 'var(--red)' }}>API server is not responding</strong>
           <p style={{ fontSize: '0.82rem', marginTop: '0.3rem', color: 'var(--text-muted)' }}>
-            Run <code style={{ background: 'var(--bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>npm run dev:api</code> from the project root.
+            Showing last known data. Run <code style={{ background: 'var(--bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>npm run dev:api</code> from the project root.
           </p>
         </div>
       )}
@@ -212,7 +228,7 @@ export default function FeedPage() {
                     {opp.mapping_kind === 'manual_unverified' && (
                       <span className="badge badge-red" style={{ marginRight: '0.4rem', fontSize: '0.6rem' }}>UNVERIFIED</span>
                     )}
-                    {opp.label}
+                    {stripMarkdown(opp.label)}
                   </div>
                   <div className="feed-direction" style={{ marginTop: '0.35rem' }}>
                     <DirectionBadge direction={opp.direction} />
@@ -253,7 +269,7 @@ export default function FeedPage() {
                     {!isSuspect && opp.mapping_kind !== 'manual_unverified' && (
                       <button
                         className="btn btn-sm btn-primary"
-                        onClick={() => handleSimulate(opp.id, opp.mapping_id)}
+                        onClick={() => handleSimulate(opp.id)}
                         disabled={executing === opp.id}
                       >
                         {executing === opp.id ? 'Simulating...' : 'Simulate'}

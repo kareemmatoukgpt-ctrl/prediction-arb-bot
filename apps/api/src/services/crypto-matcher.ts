@@ -202,11 +202,20 @@ export function generateSuggestions(minScore = 40): {
   let arb_eligible = 0;
   let research = 0;
 
+  // Collect all suggestions first, then batch-upsert in a transaction
+  const pending: { pm: MarketRow; kalshi: MarketRow; result: ScoreResult }[] = [];
   for (const pm of pmMarkets) {
     const candidates = kalshiByAsset.get(pm.asset!) ?? [];
     for (const kalshi of candidates) {
       const result = scorePair(pm, kalshi);
       if (result.score < minScore) continue;
+      pending.push({ pm, kalshi, result });
+    }
+  }
+
+  // Batch upsert in transaction (100x faster than individual inserts)
+  const runBatch = db.transaction((batch: typeof pending) => {
+    for (const { pm, kalshi, result } of batch) {
       const info = upsert.run(
         uuid(),
         pm.venue_market_id,
@@ -222,6 +231,11 @@ export function generateSuggestions(minScore = 40): {
         if (result.bucket === 'arb_eligible') arb_eligible++; else research++;
       }
     }
+  });
+
+  const BATCH = 1000;
+  for (let i = 0; i < pending.length; i += BATCH) {
+    runBatch(pending.slice(i, i + BATCH));
   }
 
   console.log(`[crypto-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research})`);

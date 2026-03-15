@@ -140,18 +140,27 @@ function upsertCategorizedMarkets(markets: NormalizedMarket[], venue: string, ca
       event_group = excluded.event_group
   `);
 
-  for (const m of markets) {
-    const cf = m.cryptoFields;
-    upsert.run(
-      uuid(), venue, m.venueMarketId, m.question,
-      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
-      m.resolvesAt || null,
-      cf?.asset ?? null, cf?.expiryTs ?? null,
-      cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
-      cf?.predicateType ?? null,
-      category,
-      m.eventGroup ?? null,
-    );
+  // Wrap in transaction for 100x faster bulk inserts (single fsync instead of one per row)
+  const runBatch = db.transaction((batch: NormalizedMarket[]) => {
+    for (const m of batch) {
+      const cf = m.cryptoFields;
+      upsert.run(
+        uuid(), venue, m.venueMarketId, m.question,
+        m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
+        m.resolvesAt || null,
+        cf?.asset ?? null, cf?.expiryTs ?? null,
+        cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
+        cf?.predicateType ?? null,
+        category,
+        m.eventGroup ?? null,
+      );
+    }
+  });
+
+  // Process in batches of 500 to keep transaction size manageable
+  const BATCH = 500;
+  for (let i = 0; i < markets.length; i += BATCH) {
+    runBatch(markets.slice(i, i + BATCH));
   }
   return markets.length;
 }
@@ -233,8 +242,8 @@ export async function refreshOrderbooks(): Promise<number> {
            k.yes_token_id as k_yes_token, k.no_token_id as k_no_token,
            k.id as k_id
     FROM match_mappings m
-    JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
-    JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
+    CROSS JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
+    CROSS JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
     WHERE m.enabled = 1
   `).all() as any[];
 
@@ -343,18 +352,23 @@ export function startIngestion(): void {
   // Start hourly cleanup of old opportunities
   startCleanupTimer();
 
-  // Initial fetch: all categories + orderbooks + arb scan
-  refreshAllCategories().catch(console.error);
+  // Initial fetch: orderbooks + arb scan first (fast, uses existing DB data)
+  // Skip conditional arbs on startup — they scan 6K+ event groups and block the event loop
   refreshOrderbooks().then(() => {
     scanForArbs();
-    const conditionals = scanConditionalArbs();
-    upsertConditionalOpportunities(conditionals);
   }).catch(console.error);
 
-  // After initial ingestion completes, run auto-match pipeline (delayed 30s to let ingestion finish)
+  // Defer the heavy market refresh (paginated fetch of thousands of markets)
+  // so the API can serve requests immediately on startup
+  setTimeout(() => {
+    console.log('[ingestion] Starting deferred market refresh...');
+    refreshAllCategories().catch(console.error);
+  }, 15000);
+
+  // Run auto-match pipeline after market refresh has had time to complete
   setTimeout(() => {
     runAutoMatchPipeline().catch(console.error);
-  }, 30000);
+  }, 120000);
 
   marketTimer = setInterval(() => {
     refreshAllCategories().catch(console.error);
@@ -366,15 +380,22 @@ export function startIngestion(): void {
     try {
       await refreshOrderbooks();
       scanForArbs();
-      // Also scan for conditional arbs (complement/mutex within same venue)
-      const conditionals = scanConditionalArbs();
-      upsertConditionalOpportunities(conditionals);
     } catch (err) {
       console.error('[ingestion] Orderbook refresh + arb scan error:', err);
     } finally {
       isOrderbookRunning = false;
     }
   }, orderbookInterval);
+
+  // Conditional arbs run less frequently (every 5 min) — they scan 6K+ event groups
+  setInterval(() => {
+    try {
+      const conditionals = scanConditionalArbs();
+      upsertConditionalOpportunities(conditionals);
+    } catch (err) {
+      console.error('[ingestion] Conditional arb scan error:', err);
+    }
+  }, 300000);
 
   matchTimer = setInterval(() => {
     runAutoMatchPipeline().catch(console.error);

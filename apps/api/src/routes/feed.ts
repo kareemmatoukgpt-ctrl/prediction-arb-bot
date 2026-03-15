@@ -161,8 +161,8 @@ router.get('/health', (_req: any, res: any) => {
   const withSnapshots = db.prepare(`
     SELECT COUNT(DISTINCT m.id) as cnt
     FROM match_mappings m
-    JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
-    JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
+    CROSS JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
+    CROSS JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
     WHERE m.enabled = 1
     AND EXISTS (SELECT 1 FROM orderbook_snapshots os WHERE os.market_id = pm.id)
     AND EXISTS (SELECT 1 FROM orderbook_snapshots os WHERE os.market_id = k.id)

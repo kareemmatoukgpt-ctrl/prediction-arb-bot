@@ -46,7 +46,9 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
   const sizeUSD = parseFloat(process.env.DEFAULT_TRADE_SIZE_USD || '100');
   const costParams = getCostParams();
 
-  // Get all enabled mappings with their latest orderbook snapshots
+  // Get all enabled mappings with their latest orderbook snapshots.
+  // Use CROSS JOIN to force SQLite to start from match_mappings (9 rows)
+  // instead of scanning canonical_markets (85K+ rows) first.
   const mappings = db.prepare(`
     SELECT
       m.id as mapping_id,
@@ -64,8 +66,8 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
       k.expiry_ts as k_expiry_ts,
       k.predicate_type as k_predicate_type
     FROM match_mappings m
-    JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
-    JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
+    CROSS JOIN canonical_markets pm ON pm.venue = 'POLYMARKET' AND pm.venue_market_id = m.polymarket_market_id
+    CROSS JOIN canonical_markets k ON k.venue = 'KALSHI' AND k.venue_market_id = m.kalshi_market_id
     WHERE m.enabled = 1
       AND pm.status = 'open'
       AND k.status = 'open'

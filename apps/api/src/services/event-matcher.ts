@@ -187,6 +187,7 @@ export function generateEventSuggestions(minScore = 50): {
   let arb_eligible = 0;
   let research = 0;
   let pairsChecked = 0;
+  const pending: { pm: any; kalshi: any; result: any; expiryDelta: number | null }[] = [];
 
   // Build inverted index: token → set of Kalshi market indices
   // This avoids O(PM * K) full comparisons by only scoring pairs that share tokens
@@ -231,6 +232,13 @@ export function generateEventSuggestions(minScore = 50): {
       const expiryDelta = (pm.expiry_ts && kalshi.expiry_ts)
         ? Math.abs(pm.expiry_ts - kalshi.expiry_ts) : null;
 
+      pending.push({ pm, kalshi, result, expiryDelta });
+    }
+  }
+
+  // Batch upsert in transaction (avoids blocking event loop with individual fsyncs)
+  const runBatch = db.transaction((batch: typeof pending) => {
+    for (const { pm, kalshi, result, expiryDelta } of batch) {
       const info = upsert.run(
         uuid(),
         pm.venue_market_id,
@@ -241,12 +249,16 @@ export function generateEventSuggestions(minScore = 50): {
         expiryDelta,
         result.similarity,
       );
-
       if (info.changes > 0) {
         total++;
         if (result.bucket === 'arb_eligible') arb_eligible++; else research++;
       }
     }
+  });
+
+  const BATCH = 1000;
+  for (let i = 0; i < pending.length; i += BATCH) {
+    runBatch(pending.slice(i, i + BATCH));
   }
 
   console.log(`[event-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research}) — checked ${pairsChecked} candidate pairs from ${pmMarkets.length} PM x ${kalshiMarkets.length} Kalshi event markets`);

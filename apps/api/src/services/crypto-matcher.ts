@@ -108,8 +108,9 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
   // Threshold match (up to +25)
   let thresholdDeltaPct: number | null = null;
   let thresholdArbGate = false;
-  if (pm.predicate_threshold != null && kalshi.predicate_threshold != null && kalshi.predicate_threshold !== 0) {
-    thresholdDeltaPct = Math.abs(pm.predicate_threshold - kalshi.predicate_threshold) / kalshi.predicate_threshold;
+  if (pm.predicate_threshold != null && kalshi.predicate_threshold != null) {
+    const maxThresh = Math.max(Math.abs(pm.predicate_threshold), Math.abs(kalshi.predicate_threshold));
+    thresholdDeltaPct = maxThresh > 0 ? Math.abs(pm.predicate_threshold - kalshi.predicate_threshold) / maxThresh : 0;
     const pct = thresholdDeltaPct;
     if (pct === 0) {
       score += 25; reasons.push(`Threshold exact match: $${kalshi.predicate_threshold.toLocaleString()}`); thresholdArbGate = true;

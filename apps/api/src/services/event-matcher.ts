@@ -149,9 +149,9 @@ export function scoreEventPair(pm: EventMarketRow, kalshi: EventMarketRow): Even
 /**
  * Generate event market suggestions by cross-comparing PM and Kalshi event markets.
  */
-export function generateEventSuggestions(minScore = 50): {
+export async function generateEventSuggestions(minScore = 50): Promise<{
   created: number; arb_eligible: number; research: number;
-} {
+}> {
   const db = getDb();
 
   const pmMarkets = db.prepare(`
@@ -206,6 +206,7 @@ export function generateEventSuggestions(minScore = 50): {
     }
   }
 
+  let pmProcessed = 0;
   for (const pm of pmMarkets) {
     const pmTokens = tokenize(pm.question);
 
@@ -219,9 +220,9 @@ export function generateEventSuggestions(minScore = 50): {
       }
     }
 
-    // Only score pairs with >= 2 shared tokens (minimum for meaningful similarity)
+    // Only score pairs with >= 3 shared tokens (reduces candidate pairs significantly)
     for (const [kIdx, sharedCount] of candidateCounts) {
-      if (sharedCount < 2) continue;
+      if (sharedCount < 3) continue;
 
       const kalshi = kalshiTokenized[kIdx].market;
       pairsChecked++;
@@ -233,6 +234,12 @@ export function generateEventSuggestions(minScore = 50): {
         ? Math.abs(pm.expiry_ts - kalshi.expiry_ts) : null;
 
       pending.push({ pm, kalshi, result, expiryDelta });
+    }
+
+    // Yield event loop every 200 PM markets to keep API responsive
+    pmProcessed++;
+    if (pmProcessed % 200 === 0) {
+      await new Promise(r => setImmediate(r));
     }
   }
 
@@ -256,9 +263,10 @@ export function generateEventSuggestions(minScore = 50): {
     }
   });
 
-  const BATCH = 1000;
+  const BATCH = 200;
   for (let i = 0; i < pending.length; i += BATCH) {
     runBatch(pending.slice(i, i + BATCH));
+    if (i + BATCH < pending.length) await new Promise(r => setImmediate(r));
   }
 
   console.log(`[event-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research}) — checked ${pairsChecked} candidate pairs from ${pmMarkets.length} PM x ${kalshiMarkets.length} Kalshi event markets`);

@@ -57,10 +57,10 @@ router.get('/:id', (req: any, res: any) => {
 });
 
 // Generate suggestions (crypto + event)
-router.post('/generate', (_req: any, res: any) => {
+router.post('/generate', async (_req: any, res: any) => {
   try {
-    const crypto = generateSuggestions(40);
-    const events = generateEventSuggestions(35);
+    const crypto = await generateSuggestions(70);
+    const events = await generateEventSuggestions(50);
     res.json({
       success: true,
       arb_eligible: (crypto.arb_eligible ?? 0) + (events.arb_eligible ?? 0),

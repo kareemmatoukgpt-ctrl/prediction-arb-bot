@@ -159,9 +159,9 @@ export function scorePair(pm: MarketRow, kalshi: MarketRow): ScoreResult {
  * Generate and upsert mapping suggestions for all crypto market pairs.
  * Returns counts of upserted suggestions by bucket.
  */
-export function generateSuggestions(minScore = 40): {
+export async function generateSuggestions(minScore = 40): Promise<{
   created: number; updated: number; arb_eligible: number; research: number;
-} {
+}> {
   const db = getDb();
 
   const pmMarkets = db.prepare(`
@@ -204,12 +204,18 @@ export function generateSuggestions(minScore = 40): {
 
   // Collect all suggestions first, then batch-upsert in a transaction
   const pending: { pm: MarketRow; kalshi: MarketRow; result: ScoreResult }[] = [];
+  let pairsScored = 0;
   for (const pm of pmMarkets) {
     const candidates = kalshiByAsset.get(pm.asset!) ?? [];
     for (const kalshi of candidates) {
       const result = scorePair(pm, kalshi);
+      pairsScored++;
       if (result.score < minScore) continue;
       pending.push({ pm, kalshi, result });
+    }
+    // Yield event loop every 500 PM markets scored
+    if (pairsScored % 5000 === 0) {
+      await new Promise(r => setImmediate(r));
     }
   }
 
@@ -233,9 +239,10 @@ export function generateSuggestions(minScore = 40): {
     }
   });
 
-  const BATCH = 1000;
+  const BATCH = 200;
   for (let i = 0; i < pending.length; i += BATCH) {
     runBatch(pending.slice(i, i + BATCH));
+    if (i + BATCH < pending.length) await new Promise(r => setImmediate(r));
   }
 
   console.log(`[crypto-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research})`);

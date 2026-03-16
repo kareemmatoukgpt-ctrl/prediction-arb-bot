@@ -85,7 +85,7 @@ async function run(): Promise<void> {
   console.log('\nStep 3: Generating suggestions...');
   let genResult = { created: 0, updated: 0, arb_eligible: 0, research: 0 };
   try {
-    genResult = generateSuggestions(0);
+    genResult = await generateSuggestions(0);
     console.log(`  Total:        ${genResult.created}`);
     console.log(`  Arb-eligible: ${genResult.arb_eligible}`);
     console.log(`  Research:     ${genResult.research}`);

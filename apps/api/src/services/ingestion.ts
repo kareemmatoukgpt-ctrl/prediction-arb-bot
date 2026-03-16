@@ -37,23 +37,21 @@ export async function refreshMarkets(): Promise<{ polymarket: number; kalshi: nu
       updated_at = datetime('now')
   `);
 
+  const runBatch = db.transaction((markets: any[], venue: string) => {
+    for (const m of markets) {
+      upsert.run(
+        uuid(), venue, m.venueMarketId, m.question,
+        m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
+        m.resolvesAt || null,
+      );
+    }
+  });
+
   const pmMarkets = await fetchPolymarketMarkets();
-  for (const m of pmMarkets) {
-    upsert.run(
-      uuid(), 'POLYMARKET', m.venueMarketId, m.question,
-      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
-      m.resolvesAt || null,
-    );
-  }
+  runBatch(pmMarkets, 'POLYMARKET');
 
   const kalshiMarkets = await fetchKalshiMarkets();
-  for (const m of kalshiMarkets) {
-    upsert.run(
-      uuid(), 'KALSHI', m.venueMarketId, m.question,
-      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
-      m.resolvesAt || null,
-    );
-  }
+  runBatch(kalshiMarkets, 'KALSHI');
 
   console.log(`[ingestion] Refreshed markets: PM=${pmMarkets.length}, Kalshi=${kalshiMarkets.length}`);
   return { polymarket: pmMarkets.length, kalshi: kalshiMarkets.length };
@@ -84,31 +82,25 @@ export async function refreshCryptoMarkets(): Promise<{ polymarket: number; kals
       predicate_type = excluded.predicate_type
   `);
 
+  const runBatch = db.transaction((markets: any[], venue: string) => {
+    for (const m of markets) {
+      const cf = m.cryptoFields;
+      upsert.run(
+        uuid(), venue, m.venueMarketId, m.question,
+        m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
+        m.resolvesAt || null,
+        cf?.asset ?? null, cf?.expiryTs ?? null,
+        cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
+        cf?.predicateType ?? null,
+      );
+    }
+  });
+
   const pmMarkets = await fetchPolymarketCryptoMarkets();
-  for (const m of pmMarkets) {
-    const cf = m.cryptoFields;
-    upsert.run(
-      uuid(), 'POLYMARKET', m.venueMarketId, m.question,
-      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
-      m.resolvesAt || null,
-      cf?.asset ?? null, cf?.expiryTs ?? null,
-      cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
-      cf?.predicateType ?? null,
-    );
-  }
+  runBatch(pmMarkets, 'POLYMARKET');
 
   const kalshiMarkets = await fetchKalshiCryptoMarkets();
-  for (const m of kalshiMarkets) {
-    const cf = m.cryptoFields;
-    upsert.run(
-      uuid(), 'KALSHI', m.venueMarketId, m.question,
-      m.url, m.status, m.yesTokenId || null, m.noTokenId || null,
-      m.resolvesAt || null,
-      cf?.asset ?? null, cf?.expiryTs ?? null,
-      cf?.predicateDirection ?? null, cf?.predicateThreshold ?? null,
-      cf?.predicateType ?? null,
-    );
-  }
+  runBatch(kalshiMarkets, 'KALSHI');
 
   console.log(`[ingestion] Crypto markets refreshed: PM=${pmMarkets.length}, Kalshi=${kalshiMarkets.length}`);
   return { polymarket: pmMarkets.length, kalshi: kalshiMarkets.length };
@@ -201,10 +193,13 @@ export async function refreshAllCategories(): Promise<void> {
     upsertCategorizedMarkets(pmCategorized.crypto, 'POLYMARKET', 'CRYPTO');
     upsertCategorizedMarkets(pmCategorized.fed, 'POLYMARKET', 'FED');
     upsertCategorizedMarkets(pmCategorized.macro, 'POLYMARKET', 'MACRO');
+    // Yield event loop between heavy upsert batches
+    await new Promise(r => setTimeout(r, 50));
 
     // Kalshi crypto (series-targeted, fast)
     const kalshiCrypto = await fetchKalshiCryptoMarkets();
     upsertCategorizedMarkets(kalshiCrypto, 'KALSHI', 'CRYPTO');
+    await new Promise(r => setTimeout(r, 50));
 
     // Kalshi FED (series-targeted, fast)
     const kalshiFed = await fetchKalshiFedMarkets();
@@ -213,9 +208,11 @@ export async function refreshAllCategories(): Promise<void> {
     // Kalshi MACRO (series-targeted, fast)
     const kalshiMacro = await fetchKalshiMacroMarkets();
     upsertCategorizedMarkets(kalshiMacro, 'KALSHI', 'MACRO');
+    await new Promise(r => setTimeout(r, 50));
 
     // PM events (captured during categorized scan — everything that didn't match crypto/FED/MACRO)
     upsertCategorizedMarkets(pmCategorized.events, 'POLYMARKET', 'EVENT');
+    await new Promise(r => setTimeout(r, 50));
 
     // Kalshi events (everything not in structured series)
     const kalshiEvents = await fetchKalshiEventMarkets();
@@ -328,8 +325,8 @@ async function runAutoMatchPipeline(): Promise<void> {
   isMatchRunning = true;
   try {
     const start = Date.now();
-    const suggestions = generateSuggestions(40);
-    const eventSuggs = generateEventSuggestions(35);
+    const suggestions = generateSuggestions(70);
+    const eventSuggs = generateEventSuggestions(50);
     const approved = autoApproveHighConfidence();
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
     console.log(`[auto-match] Pipeline done in ${elapsed}s: ${suggestions.arb_eligible} crypto arb-eligible, ${eventSuggs.arb_eligible} event arb-eligible, ${approved} auto-approved`);

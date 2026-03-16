@@ -67,37 +67,34 @@ router.get('/:id/orderbook', (req: any, res: any) => {
   res.json(snapshot);
 });
 
-// Ingest crypto markets from both venues
-router.post('/ingest/crypto', async (_req: any, res: any) => {
-  try {
-    const result = await refreshCryptoMarkets();
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[markets] ingest/crypto error:', err);
-    res.status(500).json({ error: 'Failed to ingest crypto markets' });
-  }
+// Ingest crypto markets — responds immediately, runs in background
+router.post('/ingest/crypto', (_req: any, res: any) => {
+  res.json({ success: true, message: 'Crypto ingestion started in background' });
+  refreshCryptoMarkets().then(r => {
+    console.log(`[markets] Crypto ingestion done: PM=${r.polymarket}, K=${r.kalshi}`);
+  }).catch(err => {
+    console.error('[markets] Crypto ingestion error:', err);
+  });
 });
 
-// Ingest FED markets from Kalshi
-router.post('/ingest/fed', async (_req: any, res: any) => {
-  try {
-    const result = await refreshFedMarkets();
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[markets] ingest/fed error:', err);
-    res.status(500).json({ error: 'Failed to ingest FED markets' });
-  }
+// Ingest FED markets — responds immediately, runs in background
+router.post('/ingest/fed', (_req: any, res: any) => {
+  res.json({ success: true, message: 'FED ingestion started in background' });
+  refreshFedMarkets().then(r => {
+    console.log(`[markets] FED ingestion done: K=${r.kalshi}`);
+  }).catch(err => {
+    console.error('[markets] FED ingestion error:', err);
+  });
 });
 
-// Ingest MACRO markets (CPI, GDP) from Kalshi
-router.post('/ingest/macro', async (_req: any, res: any) => {
-  try {
-    const result = await refreshMacroMarkets();
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('[markets] ingest/macro error:', err);
-    res.status(500).json({ error: 'Failed to ingest MACRO markets' });
-  }
+// Ingest MACRO markets — responds immediately, runs in background
+router.post('/ingest/macro', (_req: any, res: any) => {
+  res.json({ success: true, message: 'MACRO ingestion started in background' });
+  refreshMacroMarkets().then(r => {
+    console.log(`[markets] MACRO ingestion done: K=${r.kalshi}`);
+  }).catch(err => {
+    console.error('[markets] MACRO ingestion error:', err);
+  });
 });
 
 export default router;

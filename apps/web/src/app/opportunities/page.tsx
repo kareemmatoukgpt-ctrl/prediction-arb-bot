@@ -1,176 +1,195 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getOpportunities, scanOpportunities, executePaperTrade } from '@/lib/api';
+import { getFeedStats } from '@/lib/api';
 
-export default function OpportunitiesPage() {
-  const [opps, setOpps] = useState<any[]>([]);
-  const [minEdge, setMinEdge] = useState(0);
-  const [showUnverified, setShowUnverified] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [executing, setExecuting] = useState<string | null>(null);
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+async function fetchHealth() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(`${API_BASE}/api/feed/health`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export default function DiagnosticsPage() {
+  const [health, setHealth] = useState<any>(null);
+  const [stats, setStats] = useState<any>(null);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   async function load() {
     try {
-      const data = await getOpportunities({ limit: 100, minEdgeBps: minEdge });
-      setOpps(data);
+      const [h, s] = await Promise.all([fetchHealth(), getFeedStats()]);
+      setHealth(h);
+      setStats(s);
+      setError('');
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to load diagnostics');
+    } finally {
+      setLoading(false);
     }
   }
 
-  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [minEdge]);
+  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, []);
 
-  async function handleScan() {
-    setScanning(true);
-    try {
-      await scanOpportunities();
-      await load();
-    } catch (err: any) {
-      setError(err.message);
-    }
-    setScanning(false);
-  }
-
-  async function handleExecute(oppId: string) {
-    setExecuting(oppId);
-    setResult(null);
-    try {
-      const res = await executePaperTrade(oppId);
-      setResult(res);
-    } catch (err: any) {
-      setError(err.message);
-    }
-    setExecuting(null);
-  }
-
-  const filtered = showUnverified
-    ? opps
-    : opps.filter((o: any) => o.mapping_kind === 'crypto_arb_eligible');
-
-  const unverifiedCount = opps.filter((o: any) => o.mapping_kind !== 'crypto_arb_eligible').length;
+  if (loading) return <div style={{ padding: '2rem', color: 'var(--text-muted)' }}>Loading diagnostics...</div>;
 
   return (
     <>
       <div className="page-header">
-        <h1>Arbitrage Opportunities</h1>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <label style={{ margin: 0 }}>Min edge (bps):</label>
-          <input
-            type="number"
-            value={minEdge}
-            onChange={(e) => setMinEdge(parseInt(e.target.value) || 0)}
-            style={{ width: '80px' }}
-          />
-          <button className="btn btn-primary" onClick={handleScan} disabled={scanning}>
-            {scanning ? 'Scanning...' : 'Scan Now'}
-          </button>
-        </div>
+        <h1>Pipeline Diagnostics</h1>
+        <button className="btn btn-primary" onClick={() => { setLoading(true); load(); }}>Refresh</button>
       </div>
 
-      {error && <div className="card" style={{ borderColor: 'var(--red)' }}>{error}</div>}
+      {error && <div className="card" style={{ borderColor: 'var(--red)', marginBottom: '1rem' }}>{error}</div>}
 
-      {result && (
-        <div className="card" style={{ borderColor: result.status === 'SIMULATED' ? 'var(--green)' : 'var(--red)' }}>
-          <h3 style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-            Paper Trade Result: <span className={`badge ${result.status === 'SIMULATED' ? 'badge-green' : 'badge-red'}`}>{result.status}</span>
-          </h3>
-          <p style={{ fontSize: '0.85rem' }}>
-            PnL: <span className={result.result?.pnl >= 0 ? 'profit' : 'loss'}>${result.result?.pnl?.toFixed(4) ?? '0'}</span>
-            {result.result?.avgPriceYes != null && <>{' | '}Yes: ${result.result.avgPriceYes.toFixed(4)}</>}
-            {result.result?.avgPriceNo != null && <>{' | '}No: ${result.result.avgPriceNo.toFixed(4)}</>}
-            {result.result?.failureReason && <> | Reason: {result.result.failureReason}</>}
-          </p>
-        </div>
+      {/* Feed Stats */}
+      {stats && (
+        <>
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-muted)' }}>Active Opportunities</h2>
+          <div className="stats-grid">
+            <div className="card stat-card">
+              <div className="stat-value profit">${stats.totalProfit?.toFixed(2)}</div>
+              <div className="stat-label">Total Profit</div>
+            </div>
+            <div className="card stat-card">
+              <div className="stat-value">{stats.count}</div>
+              <div className="stat-label">Opportunities</div>
+            </div>
+            <div className="card stat-card">
+              <div className="stat-value">{stats.maxEdgeBps}</div>
+              <div className="stat-label">Max Edge (bps)</div>
+            </div>
+            <div className="card stat-card">
+              <div className="stat-value" style={{ color: 'var(--yellow)' }}>{stats.suspectCount}</div>
+              <div className="stat-label">Suspect</div>
+            </div>
+          </div>
+        </>
       )}
 
-      {unverifiedCount > 0 && (
-        <div className="card" style={{ marginBottom: '1rem', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ color: 'var(--yellow)' }}>
-            {unverifiedCount} unverified mapping{unverifiedCount > 1 ? 's' : ''} hidden (manual or non-arb-eligible)
-          </span>
-          <button
-            className="btn btn-sm"
-            onClick={() => setShowUnverified(!showUnverified)}
-          >
-            {showUnverified ? 'Hide unverified' : 'Show unverified'}
-          </button>
-        </div>
-      )}
+      {health && (
+        <>
+          {/* Markets */}
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '1.5rem 0 0.75rem', color: 'var(--text-muted)' }}>Markets Ingested</h2>
+          <div className="stats-grid">
+            {Object.entries(health.markets || {}).map(([venue, data]: [string, any]) => (
+              <div key={venue} className="card stat-card">
+                <div className="stat-value">{data.total?.toLocaleString()}</div>
+                <div className="stat-label">{venue}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.4rem' }}>
+                  {data.close_at > 0 && <span>CLOSE_AT: {data.close_at} </span>}
+                  {data.touch_by > 0 && <span>TOUCH_BY: {data.touch_by} </span>}
+                  {data.binary_event > 0 && <span>EVENT: {data.binary_event}</span>}
+                </div>
+              </div>
+            ))}
+            <div className="card stat-card">
+              <div className="stat-value">{health.eventGroups?.toLocaleString()}</div>
+              <div className="stat-label">Event Groups</div>
+            </div>
+          </div>
 
-      <div className="card">
-        {filtered.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            No opportunities found. Make sure you have enabled mappings and the orderbook scanner is running.
-            {!showUnverified && unverifiedCount > 0 && (
-              <span> ({unverifiedCount} hidden from unverified mappings)</span>
-            )}
-          </p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Label</th>
-                <th>Direction</th>
-                <th>YES Price</th>
-                <th>NO Price</th>
-                <th>Total Cost</th>
-                <th>Edge (bps)</th>
-                <th>Profit (USD)</th>
-                <th>Buffer</th>
-                <th>Time</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((opp: any) => {
-                const isUnverified = opp.mapping_kind !== 'crypto_arb_eligible';
-                return (
-                  <tr key={opp.id} style={isUnverified ? { opacity: 0.6 } : {}}>
-                    <td style={{ fontWeight: 500 }}>
-                      {isUnverified && (
-                        <span className="badge badge-red" style={{ marginRight: '0.5rem', fontSize: '0.6rem' }}>
-                          UNVERIFIED
-                        </span>
-                      )}
-                      {opp.mapping_label}
-                    </td>
-                    <td>
-                      <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>
-                        {opp.direction === 'BUY_YES_PM_BUY_NO_KALSHI' ? 'YES PM / NO K' : 'NO PM / YES K'}
-                      </span>
-                    </td>
-                    <td>${opp.cost_yes?.toFixed(3)}</td>
-                    <td>${opp.cost_no?.toFixed(3)}</td>
-                    <td>${(opp.cost_yes + opp.cost_no)?.toFixed(3)}</td>
-                    <td className="profit">{opp.expected_profit_bps}</td>
-                    <td className="profit">${opp.expected_profit_usd?.toFixed(2)}</td>
-                    <td>{opp.buffer_bps} bps</td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                      {new Date(opp.ts).toLocaleTimeString()}
-                    </td>
-                    <td>
-                      {isUnverified ? (
-                        <span style={{ fontSize: '0.7rem', color: 'var(--red)' }}>DO NOT TRUST</span>
-                      ) : (
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => handleExecute(opp.id)}
-                          disabled={executing === opp.id}
-                        >
-                          {executing === opp.id ? 'Simulating...' : 'Simulate Execute'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+          {/* By Category */}
+          {health.marketsByCategory?.length > 0 && (
+            <>
+              <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '1.5rem 0 0.75rem', color: 'var(--text-muted)' }}>Markets by Category</h2>
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <table>
+                  <thead>
+                    <tr><th>Category</th><th>Count</th></tr>
+                  </thead>
+                  <tbody>
+                    {health.marketsByCategory.map((c: any) => (
+                      <tr key={c.category}>
+                        <td><span className="badge badge-purple">{c.category}</span></td>
+                        <td>{c.cnt?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {/* Pipeline Status */}
+          <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '1.5rem 0 0.75rem', color: 'var(--text-muted)' }}>Pipeline Status</h2>
+          <div className="stats-grid">
+            <div className="card stat-card">
+              <div className="stat-value">{health.mappings?.total}</div>
+              <div className="stat-label">Total Mappings</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.3rem' }}>
+                {health.mappings?.enabled} enabled, {health.mappings?.with_snapshots} with snapshots
+              </div>
+            </div>
+            <div className="card stat-card">
+              <div className="stat-value">{health.suggestions?.arb_eligible}</div>
+              <div className="stat-label">Arb-eligible Suggestions</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.3rem' }}>
+                {health.suggestions?.total?.toLocaleString()} total
+              </div>
+            </div>
+            <div className="card stat-card">
+              <div className="stat-value">{health.opportunities?.total}</div>
+              <div className="stat-label">Active Opportunities</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '0.3rem' }}>
+                {health.opportunities?.non_suspect} non-suspect
+              </div>
+            </div>
+          </div>
+
+          {/* Opportunities by Category */}
+          {health.opportunities?.byCategory?.length > 0 && (
+            <>
+              <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '1.5rem 0 0.75rem', color: 'var(--text-muted)' }}>Opportunities by Category</h2>
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <table>
+                  <thead>
+                    <tr><th>Category</th><th>Total</th><th>Non-suspect</th></tr>
+                  </thead>
+                  <tbody>
+                    {health.opportunities.byCategory.map((c: any) => (
+                      <tr key={c.category}>
+                        <td><span className="badge badge-purple">{c.category}</span></td>
+                        <td>{c.cnt}</td>
+                        <td style={{ color: 'var(--green)' }}>{c.non_suspect}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {/* Opportunities by Arb Type */}
+          {health.opportunities?.byArbType?.length > 0 && (
+            <>
+              <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '1.5rem 0 0.75rem', color: 'var(--text-muted)' }}>Opportunities by Type</h2>
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <table>
+                  <thead>
+                    <tr><th>Arb Type</th><th>Count</th></tr>
+                  </thead>
+                  <tbody>
+                    {health.opportunities.byArbType.map((t: any) => (
+                      <tr key={t.arb_type}>
+                        <td><span className="badge badge-blue">{t.arb_type}</span></td>
+                        <td>{t.cnt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </>
+      )}
     </>
   );
 }

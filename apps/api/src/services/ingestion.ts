@@ -109,7 +109,7 @@ export async function refreshCryptoMarkets(): Promise<{ polymarket: number; kals
 /**
  * Upsert categorized markets into the database with proper category tagging.
  */
-function upsertCategorizedMarkets(markets: NormalizedMarket[], venue: string, category: string): number {
+async function upsertCategorizedMarkets(markets: NormalizedMarket[], venue: string, category: string): Promise<number> {
   const db = getDb();
   const upsert = db.prepare(`
     INSERT INTO canonical_markets (id, venue, venue_market_id, question, url, status, yes_token_id, no_token_id, resolves_at, updated_at,
@@ -149,10 +149,14 @@ function upsertCategorizedMarkets(markets: NormalizedMarket[], venue: string, ca
     }
   });
 
-  // Process in batches of 500 to keep transaction size manageable
-  const BATCH = 500;
+  // Process in small batches with event loop yields between them
+  const BATCH = 200;
   for (let i = 0; i < markets.length; i += BATCH) {
     runBatch(markets.slice(i, i + BATCH));
+    // Yield event loop so Express can serve requests between batches
+    if (i + BATCH < markets.length) {
+      await new Promise(r => setImmediate(r));
+    }
   }
   return markets.length;
 }
@@ -163,7 +167,7 @@ function upsertCategorizedMarkets(markets: NormalizedMarket[], venue: string, ca
  */
 export async function refreshFedMarkets(): Promise<{ kalshi: number }> {
   const kalshiFed = await fetchKalshiFedMarkets();
-  upsertCategorizedMarkets(kalshiFed, 'KALSHI', 'FED');
+  await upsertCategorizedMarkets(kalshiFed, 'KALSHI', 'FED');
   console.log(`[ingestion] FED markets refreshed: Kalshi=${kalshiFed.length}`);
   return { kalshi: kalshiFed.length };
 }
@@ -174,7 +178,7 @@ export async function refreshFedMarkets(): Promise<{ kalshi: number }> {
  */
 export async function refreshMacroMarkets(): Promise<{ kalshi: number }> {
   const kalshiMacro = await fetchKalshiMacroMarkets();
-  upsertCategorizedMarkets(kalshiMacro, 'KALSHI', 'MACRO');
+  await upsertCategorizedMarkets(kalshiMacro, 'KALSHI', 'MACRO');
   console.log(`[ingestion] MACRO markets refreshed: Kalshi=${kalshiMacro.length}`);
   return { kalshi: kalshiMacro.length };
 }
@@ -190,33 +194,28 @@ export async function refreshAllCategories(): Promise<void> {
   try {
     // Single PM scan for ALL categorized markets (crypto + FED + MACRO)
     const pmCategorized = await fetchPolymarketCategorizedMarkets();
-    upsertCategorizedMarkets(pmCategorized.crypto, 'POLYMARKET', 'CRYPTO');
-    upsertCategorizedMarkets(pmCategorized.fed, 'POLYMARKET', 'FED');
-    upsertCategorizedMarkets(pmCategorized.macro, 'POLYMARKET', 'MACRO');
-    // Yield event loop between heavy upsert batches
-    await new Promise(r => setTimeout(r, 50));
+    await upsertCategorizedMarkets(pmCategorized.crypto, 'POLYMARKET', 'CRYPTO');
+    await upsertCategorizedMarkets(pmCategorized.fed, 'POLYMARKET', 'FED');
+    await upsertCategorizedMarkets(pmCategorized.macro, 'POLYMARKET', 'MACRO');
 
     // Kalshi crypto (series-targeted, fast)
     const kalshiCrypto = await fetchKalshiCryptoMarkets();
-    upsertCategorizedMarkets(kalshiCrypto, 'KALSHI', 'CRYPTO');
-    await new Promise(r => setTimeout(r, 50));
+    await upsertCategorizedMarkets(kalshiCrypto, 'KALSHI', 'CRYPTO');
 
     // Kalshi FED (series-targeted, fast)
     const kalshiFed = await fetchKalshiFedMarkets();
-    upsertCategorizedMarkets(kalshiFed, 'KALSHI', 'FED');
+    await upsertCategorizedMarkets(kalshiFed, 'KALSHI', 'FED');
 
     // Kalshi MACRO (series-targeted, fast)
     const kalshiMacro = await fetchKalshiMacroMarkets();
-    upsertCategorizedMarkets(kalshiMacro, 'KALSHI', 'MACRO');
-    await new Promise(r => setTimeout(r, 50));
+    await upsertCategorizedMarkets(kalshiMacro, 'KALSHI', 'MACRO');
 
     // PM events (captured during categorized scan — everything that didn't match crypto/FED/MACRO)
-    upsertCategorizedMarkets(pmCategorized.events, 'POLYMARKET', 'EVENT');
-    await new Promise(r => setTimeout(r, 50));
+    await upsertCategorizedMarkets(pmCategorized.events, 'POLYMARKET', 'EVENT');
 
     // Kalshi events (everything not in structured series)
     const kalshiEvents = await fetchKalshiEventMarkets();
-    upsertCategorizedMarkets(kalshiEvents, 'KALSHI', 'EVENT');
+    await upsertCategorizedMarkets(kalshiEvents, 'KALSHI', 'EVENT');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
     console.log(`[ingestion] All categories refreshed in ${elapsed}s (PM: ${pmCategorized.crypto.length} crypto, ${pmCategorized.fed.length} FED, ${pmCategorized.macro.length} MACRO, ${pmCategorized.events.length} events | K: ${kalshiCrypto.length} crypto, ${kalshiFed.length} FED, ${kalshiMacro.length} MACRO, ${kalshiEvents.length} events)`);

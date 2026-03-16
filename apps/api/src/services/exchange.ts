@@ -499,7 +499,7 @@ export async function fetchKalshiMarkets(
     return markets.map((m: any) => ({
       venueMarketId: m.ticker,
       question: (m.title || m.question || '').replace(/\*\*/g, ''),
-      url: `https://kalshi.com/markets/${m.event_ticker || m.ticker}`,
+      url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
       // Kalshi uses 'active'/'finalized'; normalize to the DB's allowed values
       status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
       yesTokenId: m.ticker,  // Kalshi uses ticker for both YES and NO sides
@@ -689,7 +689,7 @@ export async function fetchKalshiFedMarkets(limit = 200): Promise<NormalizedMark
         results.push({
           venueMarketId: m.ticker,
           question: m.title || m.question || '',
-          url: `https://kalshi.com/markets/${m.event_ticker || m.ticker}`,
+          url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
           status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
           yesTokenId: m.ticker,
           noTokenId: m.ticker,
@@ -733,7 +733,7 @@ export async function fetchKalshiMacroMarkets(limit = 200): Promise<NormalizedMa
         results.push({
           venueMarketId: m.ticker,
           question: m.title || m.question || '',
-          url: `https://kalshi.com/markets/${m.event_ticker || m.ticker}`,
+          url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
           status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
           yesTokenId: m.ticker,
           noTokenId: m.ticker,
@@ -913,7 +913,7 @@ export async function fetchKalshiEventMarkets(limit = 200): Promise<NormalizedMa
         results.push({
           venueMarketId: m.ticker,
           question: m.title || m.question || '',
-          url: `https://kalshi.com/markets/${m.event_ticker || m.ticker}`,
+          url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
           status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
           yesTokenId: m.ticker,
           noTokenId: m.ticker,

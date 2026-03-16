@@ -11,3 +11,4 @@ coverage/
 *.db-wal
 *.sqlite
 *.tsbuildinfo
+.claude/

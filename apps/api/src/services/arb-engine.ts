@@ -158,6 +158,11 @@ export function scanForArbs(): { found: number; opportunities: any[] } {
       continue;
     }
 
+    // Reject zero prices — $0.00 means no liquidity on that side, not free contracts
+    if (pmOb.yesAsk <= 0 || pmOb.noAsk <= 0 || kalshiOb.yesAsk <= 0 || kalshiOb.noAsk <= 0) {
+      continue;
+    }
+
     // Sanity guard: if yesAsk + noAsk < 0.20 on either side, the mapping
     // is likely invalid (wrong direction pairing or stale data). Skip.
     const pmTotal = pmOb.yesAsk + pmOb.noAsk;

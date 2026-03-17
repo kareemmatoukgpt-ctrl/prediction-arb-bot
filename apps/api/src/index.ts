@@ -14,6 +14,8 @@ import paperTradesRouter from './routes/paper-trades';
 import demoRouter from './routes/demo';
 import suggestionsRouter from './routes/suggestions';
 import feedRouter from './routes/feed';
+import sportsRouter from './routes/sports';
+import { startSportsIngestion, stopSportsIngestion } from './services/sports/sports-ingestion';
 
 const app = express();
 const PORT = parseInt(process.env.API_PORT || '3001', 10);
@@ -59,6 +61,7 @@ app.use('/api/paper-trades', paperTradesRouter);
 app.use('/api/demo', demoRouter);
 app.use('/api/suggestions', suggestionsRouter);
 app.use('/api/feed', feedRouter);
+app.use('/api/sports', sportsRouter);
 
 // Initialize database
 getDb();
@@ -85,11 +88,13 @@ const server = app.listen(PORT, () => {
 
   // Start background services (arb scanning is chained after orderbook refresh)
   startIngestion();
+  startSportsIngestion();
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('[api] Shutting down...');
+  stopSportsIngestion();
   stopIngestion();
   // cleanup timer is stopped via stopIngestion()
   server.close();
@@ -98,6 +103,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('[api] Shutting down...');
+  stopSportsIngestion();
   stopIngestion();
   // cleanup timer is stopped via stopIngestion()
   server.close();

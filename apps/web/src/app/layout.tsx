@@ -135,6 +135,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </span>
             <div className="nav-group">
               <Link href="/" className="nav-link">Feed</Link>
+              <Link href="/sports" className="nav-link">Sports</Link>
               <Link href="/paper" className="nav-link">Paper Trades</Link>
               <div className="nav-divider" />
               <Link href="/markets" className="nav-link nav-admin">Markets</Link>

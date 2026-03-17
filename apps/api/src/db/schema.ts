@@ -1,4 +1,5 @@
 import Database = require('better-sqlite3');
+import { initSportsSchema } from './sports-schema';
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS canonical_markets (
@@ -219,6 +220,7 @@ export function getDb(): any {
     db.pragma('foreign_keys = ON');
     db.exec(SCHEMA_SQL);
     runMigrations(db);
+    initSportsSchema(db);
   }
   return db;
 }

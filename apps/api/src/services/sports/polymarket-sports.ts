@@ -365,7 +365,7 @@ export async function fetchPolymarketSportsMarkets(): Promise<PolymarketSportsMa
       question,
       teams: parsed?.teams ?? [],
       betType: (parsed?.betType as PolymarketSportsMarket['betType']) ?? 'MONEYLINE',
-      side: parsed?.side ?? '',
+      side: parsed?.side || 'YES',
       line: parsed?.line ?? null,
       yesPrice: null,
       noPrice: null,

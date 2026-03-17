@@ -22,6 +22,9 @@ interface EventScoreResult {
 
 // ── Fuzzy matching utilities ──
 
+// Sports keywords — markets matching these are handled by the sports pipeline, not event-matcher
+const SPORTS_FILTER_RE = /\b(?:NBA|NFL|NHL|MLB|UFC|MMA|EPL|Premier League|La Liga|Bundesliga|Serie A|Ligue 1|MLS|Champions League|PGA|ATP|WTA|NCAAB|March Madness|Super Bowl|World Series|Stanley Cup|NBA Finals|Lakers|Celtics|Warriors|Chiefs|Eagles|Yankees|Dodgers)\b/i;
+
 const STOP_WORDS = new Set([
   'will', 'the', 'a', 'an', 'in', 'on', 'at', 'by', 'to', 'of', 'for', 'be',
   'is', 'are', 'was', 'were', 'it', 'its', 'this', 'that', 'or', 'and',
@@ -166,8 +169,12 @@ export async function generateEventSuggestions(minScore = 50): Promise<{
     WHERE venue = 'KALSHI' AND predicate_type = 'BINARY_EVENT' AND status = 'open'
   `).all() as EventMarketRow[];
 
-  if (pmMarkets.length === 0 || kalshiMarkets.length === 0) {
-    console.log(`[event-matcher] No event markets to match (PM=${pmMarkets.length}, K=${kalshiMarkets.length})`);
+  // Filter out sports markets — they're handled by the dedicated sports pipeline
+  const pmFiltered = pmMarkets.filter(m => !SPORTS_FILTER_RE.test(m.question));
+  const kalshiFiltered = kalshiMarkets.filter(m => !SPORTS_FILTER_RE.test(m.question));
+
+  if (pmFiltered.length === 0 || kalshiFiltered.length === 0) {
+    console.log(`[event-matcher] No event markets to match (PM=${pmFiltered.length}, K=${kalshiFiltered.length}) [filtered ${pmMarkets.length - pmFiltered.length} PM + ${kalshiMarkets.length - kalshiFiltered.length} K sports markets]`);
     return { created: 0, arb_eligible: 0, research: 0 };
   }
 
@@ -191,7 +198,7 @@ export async function generateEventSuggestions(minScore = 50): Promise<{
 
   // Build inverted index: token → set of Kalshi market indices
   // This avoids O(PM * K) full comparisons by only scoring pairs that share tokens
-  const kalshiTokenized = kalshiMarkets.map(k => ({
+  const kalshiTokenized = kalshiFiltered.map(k => ({
     market: k,
     tokens: tokenize(k.question),
     entities: extractEntities(k.question),
@@ -207,7 +214,7 @@ export async function generateEventSuggestions(minScore = 50): Promise<{
   }
 
   let pmProcessed = 0;
-  for (const pm of pmMarkets) {
+  for (const pm of pmFiltered) {
     const pmTokens = tokenize(pm.question);
 
     // Find candidate Kalshi markets: those sharing at least 2 tokens with this PM market
@@ -269,6 +276,6 @@ export async function generateEventSuggestions(minScore = 50): Promise<{
     if (i + BATCH < pending.length) await new Promise(r => setImmediate(r));
   }
 
-  console.log(`[event-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research}) — checked ${pairsChecked} candidate pairs from ${pmMarkets.length} PM x ${kalshiMarkets.length} Kalshi event markets`);
+  console.log(`[event-matcher] ${total} suggestions upserted (arb_eligible=${arb_eligible}, research=${research}) — checked ${pairsChecked} candidate pairs from ${pmFiltered.length} PM x ${kalshiFiltered.length} K event markets [excluded ${pmMarkets.length - pmFiltered.length} PM + ${kalshiMarkets.length - kalshiFiltered.length} K sports]`);
   return { created: total, arb_eligible, research };
 }

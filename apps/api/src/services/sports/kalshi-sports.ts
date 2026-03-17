@@ -180,7 +180,7 @@ async function fetchSeriesMarkets(
         question: titleText,
         teams: parsed.teams,
         betType: parsed.betType as KalshiSportsMarket['betType'],
-        side: parsed.side ?? '',
+        side: parsed.side || 'YES',
         line: parsed.line,
         yesPrice,
         noPrice,

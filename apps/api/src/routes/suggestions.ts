@@ -125,20 +125,28 @@ router.post('/:id/approve', (req: any, res: any) => {
   if (!kalshiMarket.yes_token_id || !kalshiMarket.no_token_id) return res.status(422).json({ error: 'Kalshi market missing outcome IDs' });
   if (kalshiMarket.status !== 'open') return res.status(422).json({ error: 'Kalshi market is not open' });
 
+  // Check if mapping already exists BEFORE inserting
+  const existing = db.prepare(
+    'SELECT id, enabled FROM match_mappings WHERE polymarket_market_id = ? AND kalshi_market_id = ?',
+  ).get(suggestion.polymarket_market_id, suggestion.kalshi_market_id) as any;
+
+  if (existing) {
+    // Re-enable if disabled, otherwise just report it exists
+    if (!existing.enabled) {
+      db.prepare('UPDATE match_mappings SET enabled = 1, updated_at = datetime(\'now\') WHERE id = ?').run(existing.id);
+    }
+    db.prepare(`UPDATE mapping_suggestions SET status = 'approved', updated_at = datetime('now') WHERE id = ?`).run(suggestion.id);
+    const mapping = db.prepare('SELECT * FROM match_mappings WHERE id = ?').get(existing.id);
+    return res.status(200).json({ mapping, message: 'Mapping already exists — re-enabled if disabled' });
+  }
+
   const label = `${pmMarket.question.slice(0, 60)} <-> ${kalshiMarket.question.slice(0, 60)}`;
   const mappingId = uuid();
 
-  try {
-    db.prepare(`
-      INSERT INTO match_mappings (id, polymarket_market_id, kalshi_market_id, label, confidence, enabled, mapping_kind)
-      VALUES (?, ?, ?, ?, ?, 1, 'crypto_arb_eligible')
-    `).run(mappingId, suggestion.polymarket_market_id, suggestion.kalshi_market_id, label, suggestion.score);
-  } catch (err: any) {
-    if (err.message?.includes('UNIQUE constraint')) {
-      return res.status(409).json({ error: 'A mapping already exists for this market pair' });
-    }
-    throw err;
-  }
+  db.prepare(`
+    INSERT INTO match_mappings (id, polymarket_market_id, kalshi_market_id, label, confidence, enabled, mapping_kind)
+    VALUES (?, ?, ?, ?, ?, 1, 'crypto_arb_eligible')
+  `).run(mappingId, suggestion.polymarket_market_id, suggestion.kalshi_market_id, label, suggestion.score);
 
   // Update suggestion status
   db.prepare(`UPDATE mapping_suggestions SET status = 'approved', updated_at = datetime('now') WHERE id = ?`).run(suggestion.id);

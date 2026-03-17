@@ -140,6 +140,13 @@ export async function refreshSportsMarkets(): Promise<{
         let eventId: string | null = null;
         if (teamA && teamB) {
           eventId = matchOrCreateEvent(m.sport, teamA, teamB, m.startTime);
+        } else if (m.teams.length >= 2) {
+          // Log unresolved teams so we can add aliases
+          const unresolved = [
+            !teamA ? m.teams[0] : null,
+            !teamB ? m.teams[1] : null,
+          ].filter(Boolean);
+          console.log(`[sports] Unresolved teams in ${m.sport}: ${unresolved.join(', ')} (from: "${m.question.slice(0, 80)}")`);
         }
 
         upsertMarket.run(

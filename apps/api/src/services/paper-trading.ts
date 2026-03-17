@@ -54,11 +54,11 @@ export function executePaperTrade(opportunityId: string): any {
   db.prepare(`
     INSERT INTO paper_trades (id, opportunity_id, ts, sim_params, result, status)
     VALUES (?, ?, datetime('now'), ?, ?, ?)
-  `).run(id, opportunityId, JSON.stringify(simParams), JSON.stringify(result), status);
+  `).run(id, opp.id, JSON.stringify(simParams), JSON.stringify(result), status);
 
   return {
     id,
-    opportunityId,
+    opportunityId: opp.id,
     simParams,
     result,
     status,

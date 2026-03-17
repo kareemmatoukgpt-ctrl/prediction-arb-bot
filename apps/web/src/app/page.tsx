@@ -236,6 +236,18 @@ export default function FeedPage() {
                       : `PM: ${(opp.pm_no_ask * 100)?.toFixed(1)}¢ / K: ${(opp.kalshi_yes_ask * 100)?.toFixed(1)}¢`
                     }
                   </div>
+                  <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.3rem' }}>
+                    {opp.pm_market_url && (
+                      <a href={opp.pm_market_url} target="_blank" rel="noopener noreferrer" className="venue-badge venue-pm" style={{ fontSize: '0.6rem', textDecoration: 'none' }} onClick={e => e.stopPropagation()}>
+                        PM Market
+                      </a>
+                    )}
+                    {opp.kalshi_market_url && (
+                      <a href={opp.kalshi_market_url} target="_blank" rel="noopener noreferrer" className="venue-badge venue-k" style={{ fontSize: '0.6rem', textDecoration: 'none' }} onClick={e => e.stopPropagation()}>
+                        Kalshi Market
+                      </a>
+                    )}
+                  </div>
                   <div className="feed-actions">
                     <Link href={`/feed/${opp.id}`}>
                       <button className="btn btn-sm btn-ghost">Details</button>

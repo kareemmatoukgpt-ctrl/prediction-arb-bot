@@ -163,6 +163,18 @@ const TEAMS: TeamDef[] = [
   { canonical: 'West Ham United', aliases: ['West Ham', 'WHU', 'West Ham United FC', 'The Hammers', 'Hammers'], sport: 'EPL' },
   { canonical: 'Wolverhampton Wanderers', aliases: ['Wolves', 'WOL', 'Wolverhampton', 'Wolverhampton Wanderers FC'], sport: 'EPL' },
 
+  // ─── EPL Championship / promoted/relegated teams Kalshi might list ───
+  { canonical: 'Sunderland', aliases: ['Sunderland AFC', 'SUN', 'The Black Cats'], sport: 'EPL' },
+  { canonical: 'Burnley', aliases: ['Burnley FC', 'BUR', 'The Clarets'], sport: 'EPL' },
+  { canonical: 'Leeds United', aliases: ['Leeds', 'LEE', 'LEU', 'Leeds United FC'], sport: 'EPL' },
+  { canonical: 'Sheffield United', aliases: ['Sheffield Utd', 'SHU', 'The Blades'], sport: 'EPL' },
+  { canonical: 'Luton Town', aliases: ['Luton', 'LUT', 'Luton Town FC'], sport: 'EPL' },
+  { canonical: 'Norwich City', aliases: ['Norwich', 'NOR', 'Norwich City FC', 'The Canaries'], sport: 'EPL' },
+  { canonical: 'Watford', aliases: ['Watford FC', 'WAT', 'The Hornets'], sport: 'EPL' },
+  { canonical: 'Middlesbrough', aliases: ['Boro', 'MID', 'Middlesbrough FC'], sport: 'EPL' },
+  { canonical: 'West Bromwich Albion', aliases: ['West Brom', 'WBA', 'West Bromwich', 'The Baggies'], sport: 'EPL' },
+  { canonical: 'Coventry City', aliases: ['Coventry', 'COV', 'Coventry City FC', 'The Sky Blues'], sport: 'EPL' },
+
   // ─── La Liga (selected teams) ────────────────────────────────────────
   { canonical: 'FC Barcelona', aliases: ['Barcelona', 'Barca', 'BAR', 'FCB', 'FC Barcelona'], sport: 'La Liga' },
   { canonical: 'Real Madrid', aliases: ['Real Madrid CF', 'RMA', 'Madrid', 'Los Blancos'], sport: 'La Liga' },

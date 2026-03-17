@@ -155,6 +155,7 @@ async function fetchSeriesMarkets(
 
     for (const m of rawMarkets) {
       const titleText: string = m.subtitle || m.title || '';
+      const ticker: string = m.ticker ?? '';
       const parsed = parseKalshiSportsTitle(titleText);
 
       // Skip markets we cannot meaningfully parse into teams
@@ -174,13 +175,27 @@ async function fetchSeriesMarkets(
         ? Math.floor(new Date(m.close_time).getTime() / 1000)
         : 0;
 
+      // Determine side from ticker suffix:
+      // e.g., KXEPLGAME-26MAR22TOTNFO-TOT = HOME, -NFO = AWAY, -TIE = DRAW
+      let side = parsed.side || 'YES';
+      if (parsed.betType === 'MONEYLINE' || !parsed.side) {
+        const tickerSuffix = ticker.split('-').pop()?.toUpperCase() ?? '';
+        if (tickerSuffix === 'TIE' || tickerSuffix === 'DRAW') {
+          side = 'DRAW';
+        } else {
+          // Map suffix back to team — first team in title gets HOME, second gets AWAY
+          // Suffix typically matches one of the team abbreviations
+          side = 'YES'; // Will be resolved by normalizer using team context
+        }
+      }
+
       markets.push({
-        venueMarketId: m.ticker ?? '',
+        venueMarketId: ticker,
         sport,
         question: titleText,
         teams: parsed.teams,
         betType: parsed.betType as KalshiSportsMarket['betType'],
-        side: parsed.side || 'YES',
+        side,
         line: parsed.line,
         yesPrice,
         noPrice,
@@ -191,32 +206,40 @@ async function fetchSeriesMarkets(
 
     cursor = data.cursor;
     if (!cursor) break;
+    // Rate limit between pages
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   return markets;
 }
 
 /**
- * Fetch sports markets across all Kalshi sports series in parallel.
+ * Delay helper for rate limiting.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Fetch sports markets across all Kalshi sports series sequentially
+ * with a delay between each to avoid HTTP 429 rate limiting.
+ * Kalshi allows ~2 requests/second.
  */
 export async function fetchKalshiSportsMarkets(): Promise<KalshiSportsMarket[]> {
   const entries = Object.entries(SERIES_PREFIXES);
-
-  const results = await Promise.allSettled(
-    entries.map(([prefix, sport]) => fetchSeriesMarkets(prefix, sport)),
-  );
-
   const allMarkets: KalshiSportsMarket[] = [];
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    if (result.status === 'fulfilled') {
-      allMarkets.push(...result.value);
-    } else {
-      console.error(
-        `[sports/kalshi] Error fetching series ${entries[i][0]}:`,
-        result.reason,
-      );
+  for (let i = 0; i < entries.length; i++) {
+    const [prefix, sport] = entries[i];
+    try {
+      const markets = await fetchSeriesMarkets(prefix, sport);
+      allMarkets.push(...markets);
+    } catch (err: any) {
+      console.error(`[sports/kalshi] Error fetching series ${prefix}:`, err.message);
+    }
+    // Rate limit: wait 600ms between series to stay under 2 req/s
+    if (i < entries.length - 1) {
+      await delay(600);
     }
   }
 

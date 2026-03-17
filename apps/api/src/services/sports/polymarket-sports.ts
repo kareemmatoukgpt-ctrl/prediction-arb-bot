@@ -333,12 +333,19 @@ export async function fetchPolymarketSportsMarkets(): Promise<PolymarketSportsMa
     return isSportsRelated(text);
   });
 
-  // 4. Build structured markets
+  // 4. Build structured markets — only keep markets with 2 parseable teams
   const structured: PolymarketSportsMarket[] = [];
+  let skippedNoTeams = 0;
   for (const m of sportsRaw) {
     const question = m.question ?? '';
     const sport = detectSport(question) ?? 'OTHER';
     const parsed = parsePolymarketSportsQuestion(question);
+
+    // Skip markets without 2 identifiable teams (futures, qualifiers, props)
+    if (!parsed || parsed.teams.length < 2) {
+      skippedNoTeams++;
+      continue;
+    }
 
     let tokenIds: string[] = [];
     try {
@@ -363,10 +370,10 @@ export async function fetchPolymarketSportsMarkets(): Promise<PolymarketSportsMa
       venueMarketId: m.condition_id ?? m.id ?? '',
       sport,
       question,
-      teams: parsed?.teams ?? [],
-      betType: (parsed?.betType as PolymarketSportsMarket['betType']) ?? 'MONEYLINE',
-      side: parsed?.side || 'YES',
-      line: parsed?.line ?? null,
+      teams: parsed.teams,
+      betType: (parsed.betType as PolymarketSportsMarket['betType']) ?? 'MONEYLINE',
+      side: parsed.side || 'YES',
+      line: parsed.line ?? null,
       yesPrice: null,
       noPrice: null,
       yesTokenId,
@@ -374,6 +381,10 @@ export async function fetchPolymarketSportsMarkets(): Promise<PolymarketSportsMa
       url,
       startTime,
     });
+  }
+
+  if (skippedNoTeams > 0) {
+    console.log(`[sports/polymarket] Skipped ${skippedNoTeams} markets without 2 parseable teams`);
   }
 
   // 5. Fetch orderbook prices in batches of 5

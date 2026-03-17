@@ -210,6 +210,54 @@ function runMigrations(database: any): void {
     database.exec(`ALTER TABLE canonical_markets ADD COLUMN event_group TEXT`);
     database.exec(`CREATE INDEX IF NOT EXISTS idx_markets_event_group ON canonical_markets(event_group)`);
   }
+
+  // Migration: rebuild Kalshi URLs to correct format /markets/{series}/{slug}/{event_ticker}
+  // Old format was /markets/{event_ticker} which 404s on kalshi.com
+  const badUrlCount = (database.prepare(
+    `SELECT COUNT(*) as cnt FROM canonical_markets
+     WHERE venue = 'KALSHI' AND url LIKE 'https://kalshi.com/markets/%'
+       AND url NOT LIKE 'https://kalshi.com/markets/%/%/%'`,
+  ).get() as any).cnt;
+  if (badUrlCount > 0) {
+    console.log(`[db] Rebuilding ${badUrlCount} Kalshi URLs to /markets/{series}/{slug}/{event_ticker} format`);
+    const rows = database.prepare(
+      `SELECT id, venue_market_id, question FROM canonical_markets
+       WHERE venue = 'KALSHI' AND url LIKE 'https://kalshi.com/markets/%'
+         AND url NOT LIKE 'https://kalshi.com/markets/%/%/%'`,
+    ).all() as any[];
+    const updateUrl = database.prepare('UPDATE canonical_markets SET url = ? WHERE id = ?');
+    const batch = database.transaction((items: any[]) => {
+      for (const r of items) {
+        const ticker = (r.venue_market_id || '').toLowerCase();
+        const eventTicker = ticker.replace(/-[^-]+$/, ''); // strip market suffix: kxfed-26mar-t425 → kxfed-26mar
+        const series = ticker.replace(/-.*$/, ''); // kxfed
+        const slug = (r.question || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          || series;
+        const url = `https://kalshi.com/markets/${series}/${slug}/${eventTicker}`;
+        updateUrl.run(url, r.id);
+      }
+    });
+    for (let i = 0; i < rows.length; i += 5000) {
+      batch(rows.slice(i, i + 5000));
+    }
+    console.log(`[db] Rebuilt ${rows.length} Kalshi URLs`);
+
+    // Also fix opportunity_feed kalshi_market_url
+    database.exec(`
+      UPDATE opportunity_feed SET kalshi_market_url = (
+        SELECT cm.url FROM canonical_markets cm
+        JOIN match_mappings mm ON mm.kalshi_market_id = cm.venue_market_id AND cm.venue = 'KALSHI'
+        WHERE mm.id = opportunity_feed.mapping_id
+      )
+      WHERE kalshi_market_url IS NOT NULL
+    `);
+    console.log('[db] Updated opportunity_feed kalshi_market_url from canonical_markets');
+  }
 }
 
 export function getDb(): any {

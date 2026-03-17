@@ -169,7 +169,14 @@ async function fetchSeriesMarkets(
         : m.no_ask_dollars != null ? Number(m.no_ask_dollars) : null;
 
       const eventTicker: string = (m.event_ticker ?? '').toLowerCase();
-      const url = `https://kalshi.com/markets/${eventTicker}`;
+      const seriesLower = seriesTicker.toLowerCase();
+      const titleForSlug = (m.title || titleText || '').toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+        || seriesLower;
+      const url = `https://kalshi.com/markets/${seriesLower}/${titleForSlug}/${eventTicker}`;
 
       const startTime = m.close_time
         ? Math.floor(new Date(m.close_time).getTime() / 1000)

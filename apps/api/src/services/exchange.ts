@@ -29,6 +29,38 @@ export function getExchangeMode(): 'live' | 'mock' {
   return mode as 'live' | 'mock';
 }
 
+// ── Kalshi URL helper ────────────────────────────────────────────────────────
+
+/**
+ * Build a working kalshi.com web URL for a market.
+ *
+ * Kalshi's web URL format:
+ *   /markets/{series_ticker}/{title-slug}/{event_ticker}
+ * All segments lowercase.  Example:
+ *   /markets/kxfed/fed-funds-rate/kxfed-26mar
+ *
+ * The API returns event_ticker and title but NOT the slug, so we derive it.
+ */
+function buildKalshiUrl(m: { event_ticker?: string; ticker?: string; title?: string; series_ticker?: string }): string {
+  const eventTicker = (m.event_ticker || m.ticker || '').toLowerCase();
+  const title = m.title || '';
+
+  // Derive series_ticker: use explicit field, or strip date/suffix from event_ticker
+  // KXFED-26MAR → KXFED, KXBTC-26MAR1318-B60875 → KXBTC
+  const seriesTicker = (m.series_ticker || eventTicker.replace(/-.*$/, '')).toLowerCase();
+
+  // Slugify the title: "Fed funds rate after Mar 2026 meeting?" → "fed-funds-rate-after-mar-2026-meeting"
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    || seriesTicker;
+
+  return `https://kalshi.com/markets/${seriesTicker}/${slug}/${eventTicker}`;
+}
+
 // ── HTTP helper ──────────────────────────────────────────────────────────────
 
 function fetchJson(url: string, timeoutMs = 15000): Promise<any> {
@@ -499,7 +531,7 @@ export async function fetchKalshiMarkets(
     return markets.map((m: any) => ({
       venueMarketId: m.ticker,
       question: (m.title || m.question || '').replace(/\*\*/g, ''),
-      url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
+      url: buildKalshiUrl(m),
       // Kalshi uses 'active'/'finalized'; normalize to the DB's allowed values
       status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
       yesTokenId: m.ticker,  // Kalshi uses ticker for both YES and NO sides
@@ -689,7 +721,7 @@ export async function fetchKalshiFedMarkets(limit = 200): Promise<NormalizedMark
         results.push({
           venueMarketId: m.ticker,
           question: m.title || m.question || '',
-          url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
+          url: buildKalshiUrl(m),
           status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
           yesTokenId: m.ticker,
           noTokenId: m.ticker,
@@ -733,7 +765,7 @@ export async function fetchKalshiMacroMarkets(limit = 200): Promise<NormalizedMa
         results.push({
           venueMarketId: m.ticker,
           question: m.title || m.question || '',
-          url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
+          url: buildKalshiUrl(m),
           status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
           yesTokenId: m.ticker,
           noTokenId: m.ticker,
@@ -913,7 +945,7 @@ export async function fetchKalshiEventMarkets(limit = 200): Promise<NormalizedMa
         results.push({
           venueMarketId: m.ticker,
           question: m.title || m.question || '',
-          url: `https://kalshi.com/markets/${(m.event_ticker || m.ticker).toLowerCase()}`,
+          url: buildKalshiUrl(m),
           status: (m.status === 'finalized' || m.status === 'closed') ? 'closed' : 'open',
           yesTokenId: m.ticker,
           noTokenId: m.ticker,
